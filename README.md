@@ -75,18 +75,16 @@ A：请检查 `wp-content/uploads/` 目录是否可写，或手动创建 `wpbkre
 ---
 
 ## 📁 文件结构
-wp-backup-restore/
+·wp-backup-restore/
 ├── wp-backup-restore.php # 主插件文件
-└── README.md # 说明文档
+└── README.md # 说明文档·
 
-text
 
-备份文件存储于：
+·备份文件存储于：
 wp-content/uploads/wpbkres/
 ├── backup_*.bgbk # 备份文件
-└── restore.log # 还原日志
+└── restore.log # 还原日志·
 
-text
 
 ---
 
