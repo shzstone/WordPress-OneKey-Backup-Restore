@@ -1,4 +1,4 @@
-# WP一键备份还原 (高性能版) ⚡
+# WP一键备份还原 ⚡
 
 [![Version](https://img.shields.io/badge/Version-1.0.3-brightgreen)](https://github.com/guoshh1978/WordPress-OneKey-Backup-Restore)
 [![PHP](https://img.shields.io/badge/PHP-7.4%2B-blue)](https://www.php.net/)
