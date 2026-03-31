@@ -1,4 +1,4 @@
-# WP一键备份还原（高性能版） ⚡
+# WP一键备份还原 ⚡
 
 [![PHP](https://img.shields.io/badge/PHP-7.4%2B-blue)](https://www.php.net/)
 [![WordPress](https://img.shields.io/badge/WordPress-5.0%2B-brightgreen)](https://wordpress.org/)
