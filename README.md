@@ -74,7 +74,7 @@
 5. **执行还原**：系统会依次执行 解压覆盖 -> 临时表导入 -> 原子切换 -> 域名替换 -> Session 恢复。
 6. **刷新页面**：完成后点击确定并刷新页面。由于数据库已更换，您可能需要重新登录。
 <div style="text-align: left;">
-  <img src="https://github.com/user-attachments/assets/62d5cd56-a4aa-435c-b5e5-69ea19ca7ee6" alt="还原全站" width="40%">
+  <img src="https://github.com/user-attachments/assets/e2636924-9440-4df3-80ab-2b6eeb2beee3" alt="还原全站" width="40%">
 </div>
 
 ---
