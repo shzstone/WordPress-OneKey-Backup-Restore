@@ -4,6 +4,7 @@
  * Description: 批量处理、兼容序列化的安全域名替换、Session保持、严格目录排除。提供现代UI、备份文件管理、分片上传（动态分片、断点续传、指数退避重试），包含磁盘空间预检查与ZIP64风险提示。
  * Version: 1.0.3
  * Author: Stone
+ * Author URI: https://blog.cacca.cc
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
