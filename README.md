@@ -7,7 +7,7 @@
 
 这是一个专为**大数据量站点**设计的 WordPress 备份与还原工具。它直接调用系统级能力，支持动态分片上传与原子级数据库切换，追求极致的执行速度与还原成功率。
 <div style="text-align: left;">
-  <img src="https://github.com/user-attachments/assets/71ebbc9a-fbae-43a0-ba7f-8f4f04932322" alt="WP 一键备份还原" width="70%">
+  <img src="https://github.com/user-attachments/assets/71ebbc9a-fbae-43a0-ba7f-8f4f04932322" alt="WP 一键备份还原" width="80%">
 </div>
 
 ---
