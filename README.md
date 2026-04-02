@@ -87,13 +87,6 @@
 
 ---
 
-### 📄 License
-
-Author: [Stone](https://blog.cacca.cc)  
-This project is licensed under the GPLv2 or later.
-
----
-
 <div style="text-align: left;">
   <img src="https://github.com/user-attachments/assets/dd821a5f-9959-4247-89eb-6f6f25bf98d1" alt="WP 一键备份还原" width="100%">
 </div>
@@ -114,3 +107,10 @@ This project is licensed under the GPLv2 or later.
 </div>
 
 ---
+
+
+### 📄 License
+
+Author: [Stone](https://blog.cacca.cc)  
+This project is licensed under the GPLv2 or later.
+
