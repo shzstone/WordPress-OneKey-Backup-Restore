@@ -1,10 +1,12 @@
 <?php
 /**
- * Plugin Name: WP一键备份还原
+ * Plugin Name: WP一键备份还原（WP One-Click Backup & Restore）
  * Description: 批量处理、兼容序列化的安全域名替换、Session保持、严格目录排除。提供现代UI、备份文件管理、分片上传（动态分片、断点续传、指数退避重试），包含磁盘空间预检查与ZIP64风险提示。
  * Version: 1.0.3
  * Author: Stone
  * Author URI: https://blog.cacca.cc
+ * Text Domain: WP-Res
+ * Domain Path: /languages
  */
 
 if ( ! defined( 'ABSPATH' ) ) exit;
@@ -29,29 +31,36 @@ class WP_Backup_Restore_Active {
     public function __construct() {
         add_action( 'admin_menu', array( $this, 'add_admin_menu' ) );
         add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_scripts' ) );
-        
+
+        // 加载文本域
+        add_action( 'plugins_loaded', array( $this, 'load_textdomain' ) );
+
         if ( ! wp_next_scheduled( 'wpbk_cleanup_temp' ) ) {
             wp_schedule_event( time(), 'daily', 'wpbk_cleanup_temp' );
         }
         add_action( 'wpbk_cleanup_temp', array( $this, 'cleanup_orphaned_temp' ) );
-        
+
         $saved_level = get_option( 'wp_backup_log_level', 'INFO' );
         $this->log_level = $saved_level;
         add_action( 'wp_ajax_save_log_level', array( $this, 'ajax_save_log_level' ) );
-        
+
         add_action( 'wp_ajax_wp_backup_download', array( $this, 'ajax_download_backup' ) );
         add_action( 'wp_ajax_wp_backup_delete',   array( $this, 'ajax_delete_backup' ) );
         add_action( 'wp_ajax_wp_backup_upload_chunk', array( $this, 'ajax_upload_chunk' ) );
         add_action( 'wp_ajax_wp_backup_upload_status', array( $this, 'ajax_upload_status' ) );
         add_action( 'wp_ajax_wp_backup_upload_cancel', array( $this, 'ajax_upload_cancel' ) );
-        
+
         add_action( 'wp_ajax_wp_backup_check_space', array( $this, 'ajax_check_space' ) );
     }
-    
+
+    public function load_textdomain() {
+        load_plugin_textdomain( 'WP-Res', false, dirname( plugin_basename( __FILE__ ) ) . '/languages' );
+    }
+
     private function get_backup_dir() {
         return rtrim(ABSPATH, '/\\') . '/wp-content/uploads/' . self::BACKUP_DIR;
     }
-    
+
     private function log_message($message, $level = 'INFO') {
         $level_values = [
             'ERROR'   => self::LOG_ERROR,
@@ -61,27 +70,27 @@ class WP_Backup_Restore_Active {
         ];
         $msg_level = isset( $level_values[ $level ] ) ? $level_values[ $level ] : self::LOG_INFO;
         if ( $msg_level > $this->get_log_level_value() ) return;
-        
+
         $log_file = $this->get_backup_dir() . '/restore.log';
         $this->maybe_truncate_log( $log_file );
         $timestamp = date('Y-m-d H:i:s');
         @file_put_contents( $log_file, "[$timestamp] [$level] $message" . PHP_EOL, FILE_APPEND | LOCK_EX );
     }
-    
+
     private function maybe_truncate_log( $file ) {
         if ( file_exists( $file ) && filesize( $file ) > self::MAX_LOG_SIZE ) {
             @file_put_contents( $file, '' );
-            $this->log_message( "日志文件超过512KB已清空", 'INFO' );
+            $this->log_message( __( 'Log file exceeded 512KB, cleared', 'WP-Res' ), 'INFO' );
         }
     }
-    
+
     private function maybe_truncate_worker_log() {
         $worker_log = $this->get_backup_dir() . '/worker_debug.log';
         if ( file_exists( $worker_log ) && filesize( $worker_log ) > self::MAX_LOG_SIZE ) {
             @file_put_contents( $worker_log, '' );
         }
     }
-    
+
     private function get_log_level_value() {
         $levels = [
             'OFF'     => self::LOG_OFF,
@@ -92,25 +101,25 @@ class WP_Backup_Restore_Active {
         ];
         return isset( $levels[ $this->log_level ] ) ? $levels[ $this->log_level ] : self::LOG_INFO;
     }
-    
+
     public function ajax_save_log_level() {
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( '无权限' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( __( 'Permission denied', 'WP-Res' ) );
         $level = isset( $_POST['level'] ) ? sanitize_text_field( $_POST['level'] ) : 'INFO';
         $allowed = array( 'OFF', 'ERROR', 'WARNING', 'INFO', 'DEBUG' );
         if ( in_array( $level, $allowed ) ) {
             update_option( 'wp_backup_log_level', $level );
             $this->log_level = $level;
-            $this->log_message( "日志级别已更改为: $level", 'INFO' );
+            $this->log_message( sprintf( __( 'Log level changed to: %s', 'WP-Res' ), $level ), 'INFO' );
             wp_send_json_success( array( 'level' => $level ) );
         } else {
-            wp_send_json_error( '无效级别' );
+            wp_send_json_error( __( 'Invalid level', 'WP-Res' ) );
         }
     }
-    
+
     public function set_stop_check_callback($callback) {
         $this->stop_check_callback = $callback;
     }
-    
+
     private function should_stop($task_id) {
         if ($this->stop_check_callback) {
             return call_user_func($this->stop_check_callback, $task_id);
@@ -120,7 +129,7 @@ class WP_Backup_Restore_Active {
         $data = json_decode(file_get_contents($file), true);
         return isset($data['stop']) && $data['stop'] === true;
     }
-    
+
     public function update_worker_state( $task_id, $data ) {
         $dir = $this->get_backup_dir();
         if (!is_dir($dir)) @mkdir($dir, 0755, true);
@@ -129,7 +138,7 @@ class WP_Backup_Restore_Active {
         $new_state = array_merge( (array)$state, (array)$data );
         file_put_contents( $file, json_encode( $new_state ), LOCK_EX );
     }
-    
+
     public function cleanup_old_residuals( $current_task_id = null ) {
         $dir = $this->get_backup_dir();
         if ( ! is_dir( $dir ) ) return;
@@ -143,11 +152,11 @@ class WP_Backup_Restore_Active {
         foreach ( glob( ABSPATH . '.wp_restore_*' ) as $f ) @unlink( $f );
         @unlink( ABSPATH . 'database.sql' );
         @unlink( ABSPATH . 'siteinfo.json' );
-        $this->log_message( "已清理旧任务残留文件", 'INFO' );
+        $this->log_message( __( 'Cleaned up residual files from previous tasks', 'WP-Res' ), 'INFO' );
     }
-    
+
     // ==================== 空间与ZIP64检查 ====================
-    
+
     private function estimate_site_size() {
         $total = 0;
         $root = ABSPATH;
@@ -167,7 +176,7 @@ class WP_Backup_Restore_Active {
         }
         return $total;
     }
-    
+
     private function estimate_restore_space( $backup_file ) {
         $zip = new ZipArchive();
         if ( $zip->open( $backup_file ) !== true ) {
@@ -181,7 +190,7 @@ class WP_Backup_Restore_Active {
         $zip->close();
         return $uncompressed * 1.2;
     }
-    
+
     private function check_zip64_compatibility( $size_in_bytes ) {
         if ( $size_in_bytes <= 4 * 1024 * 1024 * 1024 ) {
             return '';
@@ -189,49 +198,49 @@ class WP_Backup_Restore_Active {
         $php_version = PHP_VERSION;
         $libzip_version = phpversion('zip');
         if ( version_compare( PHP_VERSION, '7.0.0', '<' ) ) {
-            return "您的 PHP 版本为 {$php_version}，对超过 4GB 的 ZIP 文件（ZIP64）支持不完善，备份/还原可能失败。建议升级到 PHP 7.0 以上。";
+            return sprintf( __( 'Your PHP version is %s, which has incomplete support for ZIP64 (files >4GB). Backup/restore may fail. Upgrade to PHP 7.0+ recommended.', 'WP-Res' ), $php_version );
         } elseif ( $libzip_version && version_compare( $libzip_version, '1.6.0', '<' ) ) {
-            return "您的 libzip 扩展版本为 {$libzip_version}，对 ZIP64 支持不完整，处理大文件可能出错。请升级 libzip 到 1.6.0 以上。";
+            return sprintf( __( 'Your libzip extension version is %s, which does not fully support ZIP64. Handling large files may fail. Upgrade libzip to 1.6.0 or later.', 'WP-Res' ), $libzip_version );
         }
-        return "备份文件超过 4GB，当前环境支持 ZIP64，可正常处理。";
+        return __( 'Backup file exceeds 4GB. Your environment supports ZIP64, so it can be handled normally.', 'WP-Res' );
     }
-    
+
     public function ajax_check_space() {
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( '无权限' );
+            wp_send_json_error( __( 'Permission denied', 'WP-Res' ) );
         }
         if ( ! wp_verify_nonce( $_POST['_wpnonce'], 'wp_backup_action' ) ) {
-            wp_send_json_error( '无效请求' );
+            wp_send_json_error( __( 'Invalid request', 'WP-Res' ) );
         }
-        
+
         $type = isset( $_POST['check_type'] ) ? sanitize_text_field( $_POST['check_type'] ) : '';
         $backup_file = isset( $_POST['backup_file'] ) ? sanitize_text_field( $_POST['backup_file'] ) : '';
-        
+
         $free = disk_free_space( ABSPATH );
         if ( $free === false ) {
-            wp_send_json_error( '无法获取磁盘空间信息' );
+            wp_send_json_error( __( 'Unable to get disk space information', 'WP-Res' ) );
         }
-        
+
         $required = 0;
         $zip64_warning = '';
         $message = '';
-        
+
         if ( $type === 'backup' ) {
             $total_size = $this->estimate_site_size();
             $required = $total_size * 1.2;
-            $message = sprintf( '当前站点总大小约 %s，备份过程需要至少 %s 可用空间。', size_format( $total_size ), size_format( $required ) );
+            $message = sprintf( __( 'Current site total size approximately %s. Backup process requires at least %s of free space.', 'WP-Res' ), size_format( $total_size ), size_format( $required ) );
             $zip64_warning = $this->check_zip64_compatibility( $total_size );
         } elseif ( $type === 'restore' ) {
             if ( empty( $backup_file ) || ! file_exists( $backup_file ) ) {
-                wp_send_json_error( '备份文件不存在' );
+                wp_send_json_error( __( 'Backup file does not exist', 'WP-Res' ) );
             }
             $required = $this->estimate_restore_space( $backup_file );
-            $message = sprintf( '解压后预计占用 %s，还原过程需要至少 %s 可用空间。', size_format( $required ), size_format( $required ) );
+            $message = sprintf( __( 'Extracted content estimated to occupy %s. Restore process requires at least %s of free space.', 'WP-Res' ), size_format( $required ), size_format( $required ) );
             $zip64_warning = $this->check_zip64_compatibility( filesize( $backup_file ) );
         } else {
-            wp_send_json_error( '无效的检查类型' );
+            wp_send_json_error( __( 'Invalid check type', 'WP-Res' ) );
         }
-        
+
         $enough = ( $free >= $required );
         wp_send_json_success( array(
             'enough'        => $enough,
@@ -241,9 +250,9 @@ class WP_Backup_Restore_Active {
             'zip64_warning' => $zip64_warning,
         ) );
     }
-    
+
     // ==================== 备份引擎 ====================
-    
+
     public function do_full_backup( $task_id, $params ) {
         $this->cleanup_old_residuals( $task_id );
         $this->maybe_truncate_worker_log();
@@ -257,22 +266,22 @@ class WP_Backup_Restore_Active {
         $temp_dir = $backup_dir . '/temp_' . $task_id;
         @wp_mkdir_p( $temp_dir );
         try {
-            $this->update_worker_state( $task_id, ['status' => 'processing', 'message' => '扫描全站文件...', 'percent' => 5] );
+            $this->update_worker_state( $task_id, ['status' => 'processing', 'message' => __( 'Scanning site files...', 'WP-Res' ), 'percent' => 5] );
             $files = $this->get_file_list( ABSPATH, $backup_dir );
             $total_files = count($files);
             $temp_zip = $temp_dir . '/' . $backup_name . '.part';
             $zip = new ZipArchive();
-            if ($zip->open( $temp_zip, ZipArchive::CREATE ) !== true) throw new Exception("无法创建压缩包");
+            if ($zip->open( $temp_zip, ZipArchive::CREATE ) !== true) throw new Exception( __( 'Unable to create archive', 'WP-Res' ) );
             foreach ( $files as $i => $f ) {
-                if ( $this->should_stop($task_id) ) throw new Exception("任务已被用户停止");
+                if ( $this->should_stop($task_id) ) throw new Exception( __( 'Task stopped by user', 'WP-Res' ) );
                 if ( is_file( $f ) ) $zip->addFile( $f, str_replace( rtrim(ABSPATH, '/\\') . '/', '', $f ) );
                 if ( $i % 1000 == 0 ) {
                     $p = 5 + round(($i / $total_files) * 50);
-                    $this->update_worker_state( $task_id, ['message' => "打包文件进度: $i/$total_files", 'percent' => $p] );
+                    $this->update_worker_state( $task_id, ['message' => sprintf( __( 'Packing files: %d/%d', 'WP-Res' ), $i, $total_files ), 'percent' => $p] );
                 }
             }
             $zip->close();
-            $this->update_worker_state( $task_id, ['message' => '开始导出数据库...', 'percent' => 60] );
+            $this->update_worker_state( $task_id, ['message' => __( 'Exporting database...', 'WP-Res' ), 'percent' => 60] );
             $sql_file = $temp_dir . '/database.sql';
             $this->export_db_streaming( $sql_file, $task_id );
             $zip->open( $temp_zip );
@@ -281,53 +290,53 @@ class WP_Backup_Restore_Active {
             $zip->close();
             rename( $temp_zip, $backup_dir . '/' . $backup_name );
             $this->remove_directory( $temp_dir );
-            $this->update_worker_state( $task_id, ['status' => 'done', 'percent' => 100, 'message' => '备份圆满完成！'] );
+            $this->update_worker_state( $task_id, ['status' => 'done', 'percent' => 100, 'message' => __( 'Backup completed successfully!', 'WP-Res' )] );
         } catch ( Exception $e ) {
             $this->update_worker_state( $task_id, ['status' => 'error', 'message' => $e->getMessage()] );
         }
     }
-    
+
     // ==================== 还原引擎 ====================
-    
+
     public function do_full_restore( $task_id, $params ) {
         set_time_limit( 0 );
         @ini_set( 'memory_limit', '512M' );
         $backup_file = isset($params['backup_file']) ? $params['backup_file'] : '';
         $current_site_url = isset($params['current_url']) ? untrailingslashit($params['current_url']) : untrailingslashit(home_url());
         $root_path = rtrim(ABSPATH, '/\\') . '/';
-        $this->log_message( "=== 还原开始 ===", 'INFO' );
-        $this->log_message( "任务ID: $task_id", 'INFO' );
-        $this->log_message( "备份文件: $backup_file", 'INFO' );
-        $this->log_message( "当前目标域名: $current_site_url", 'INFO' );
+        $this->log_message( __( '=== Restore started ===', 'WP-Res' ), 'INFO' );
+        $this->log_message( sprintf( __( 'Task ID: %s', 'WP-Res' ), $task_id ), 'INFO' );
+        $this->log_message( sprintf( __( 'Backup file: %s', 'WP-Res' ), $backup_file ), 'INFO' );
+        $this->log_message( sprintf( __( 'Current target domain: %s', 'WP-Res' ), $current_site_url ), 'INFO' );
         try {
-            if (empty($backup_file) || !file_exists($backup_file)) throw new Exception("备份文件不存在");
-            $this->update_worker_state( $task_id, ['status' => 'processing', 'message' => '正在解压全站文件...', 'percent' => 10] );
+            if (empty($backup_file) || !file_exists($backup_file)) throw new Exception( __( 'Backup file does not exist', 'WP-Res' ) );
+            $this->update_worker_state( $task_id, ['status' => 'processing', 'message' => __( 'Extracting site files...', 'WP-Res' ), 'percent' => 10] );
             $zip = new ZipArchive();
             if ($zip->open($backup_file) === true) {
-                $this->log_message( "开始解压文件，共 " . $zip->numFiles . " 个", 'INFO' );
+                $this->log_message( sprintf( __( 'Start extracting, total %d files', 'WP-Res' ), $zip->numFiles ), 'INFO' );
                 for ($i = 0; $i < $zip->numFiles; $i++) {
-                    if ($this->should_stop($task_id)) throw new Exception("任务被停止");
+                    if ($this->should_stop($task_id)) throw new Exception( __( 'Task stopped', 'WP-Res' ) );
                     $filename = $zip->getNameIndex($i);
                     $zip->extractTo($root_path, $filename);
                     if ($i % 500 == 0) {
                         $p = 10 + round(($i / $zip->numFiles) * 30);
-                        $this->update_worker_state( $task_id, ['message' => "解压文件: $i/" . $zip->numFiles, 'percent' => $p] );
+                        $this->update_worker_state( $task_id, ['message' => sprintf( __( 'Extracting files: %d/%d', 'WP-Res' ), $i, $zip->numFiles ), 'percent' => $p] );
                     }
                 }
                 $zip->close();
-                $this->log_message( "解压完成", 'INFO' );
+                $this->log_message( __( 'Extraction completed', 'WP-Res' ), 'INFO' );
             } else {
-                throw new Exception("无法打开备份文件");
+                throw new Exception( __( 'Cannot open backup file', 'WP-Res' ) );
             }
             $sql_file = $root_path . 'database.sql';
             if (file_exists($sql_file)) {
                 $prefix = 'tmp_' . uniqid() . '_';
-                $this->update_worker_state( $task_id, ['message' => '准备批量导入数据库...', 'percent' => 45] );
+                $this->update_worker_state( $task_id, ['message' => __( 'Preparing bulk database import...', 'WP-Res' ), 'percent' => 45] );
                 $this->import_sql_streaming_v2( $sql_file, $prefix, $task_id );
-                $this->update_worker_state( $task_id, ['message' => '正在原子替换表结构...', 'percent' => 85] );
+                $this->update_worker_state( $task_id, ['message' => __( 'Atomically replacing table structure...', 'WP-Res' ), 'percent' => 85] );
                 $this->swap_temp_tables( $prefix );
                 @unlink($sql_file);
-                $this->log_message( "数据库导入并切换完成", 'INFO' );
+                $this->log_message( __( 'Database import and swap completed', 'WP-Res' ), 'INFO' );
             }
             $siteinfo = $root_path . 'siteinfo.json';
             if (file_exists($siteinfo)) {
@@ -335,27 +344,27 @@ class WP_Backup_Restore_Active {
                 if (isset($info['siteurl'])) {
                     $old_url = untrailingslashit($info['siteurl']);
                     if ($old_url !== $current_site_url) {
-                        $this->update_worker_state( $task_id, ['message' => "执行兼容性域名替换: $old_url -> $current_site_url"] );
+                        $this->update_worker_state( $task_id, ['message' => sprintf( __( 'Performing safe domain replacement: %s -> %s', 'WP-Res' ), $old_url, $current_site_url )] );
                         $this->replace_domain_safe($old_url, $current_site_url);
                     }
                 }
                 @unlink($siteinfo);
             }
             if (isset($params['browser_cookie'])) {
-                $this->update_worker_state( $task_id, ['message' => '正在修复登录状态...'] );
+                $this->update_worker_state( $task_id, ['message' => __( 'Restoring login session...', 'WP-Res' )] );
                 $this->preserve_session_enhanced($params['browser_cookie']);
             }
             $this->cleanup_temp_files($task_id);
-            $this->update_worker_state( $task_id, ['status' => 'done', 'percent' => 100, 'message' => '全站还原成功！'] );
-            $this->log_message( "还原流程全部完成", 'INFO' );
+            $this->update_worker_state( $task_id, ['status' => 'done', 'percent' => 100, 'message' => __( 'Full site restore successful!', 'WP-Res' )] );
+            $this->log_message( __( 'Restore process completed', 'WP-Res' ), 'INFO' );
         } catch ( Exception $e ) {
-            $this->log_message( "异常: " . $e->getMessage(), 'ERROR' );
+            $this->log_message( __( 'Exception: ', 'WP-Res' ) . $e->getMessage(), 'ERROR' );
             $this->update_worker_state( $task_id, ['status' => 'error', 'message' => $e->getMessage()] );
         }
     }
-    
+
     // ==================== 辅助函数 ====================
-    
+
     private function export_db_streaming( $file, $task_id ) {
         global $wpdb;
         $tables = $wpdb->get_results( "SHOW TABLES", ARRAY_N );
@@ -363,12 +372,12 @@ class WP_Backup_Restore_Active {
         file_put_contents( $file, "SET FOREIGN_KEY_CHECKS=0;\nSET AUTOCOMMIT=0;\n" );
         foreach ( $tables as $i => $t ) {
             $table = $t[0];
-            $this->update_worker_state( $task_id, ['message' => "导出表: $table", 'percent' => 60 + round(($i/$total)*30)] );
+            $this->update_worker_state( $task_id, ['message' => sprintf( __( 'Exporting table: %s', 'WP-Res' ), $table ), 'percent' => 60 + round(($i/$total)*30)] );
             $create = $wpdb->get_row( "SHOW CREATE TABLE `$table`", ARRAY_N );
             file_put_contents( $file, "\nSTART TRANSACTION;\nDROP TABLE IF EXISTS `$table`;\n" . $create[1] . ";\n", FILE_APPEND );
             $offset = 0;
             while ( true ) {
-                if ($this->should_stop($task_id)) throw new Exception("停止");
+                if ($this->should_stop($task_id)) throw new Exception( __( 'Stopped', 'WP-Res' ) );
                 $rows = $wpdb->get_results( "SELECT * FROM `$table` LIMIT $offset, 5000", ARRAY_A );
                 if ( empty( $rows ) ) break;
                 $values = [];
@@ -387,7 +396,7 @@ class WP_Backup_Restore_Active {
             file_put_contents( $file, "COMMIT;\n", FILE_APPEND );
         }
     }
-    
+
     private function import_sql_streaming_v2( $file, $prefix, $task_id ) {
         global $wpdb;
         $total_statements = 0;
@@ -401,7 +410,7 @@ class WP_Backup_Restore_Active {
             }
             fclose($handle_stat);
         }
-        $this->log_message( "SQL 文件总语句数: $total_statements", 'DEBUG' );
+        $this->log_message( sprintf( __( 'Total SQL statements: %d', 'WP-Res' ), $total_statements ), 'DEBUG' );
         $handle = fopen( $file, 'r' );
         if (!$handle) return;
         $wpdb->query("SET FOREIGN_KEY_CHECKS=0");
@@ -421,7 +430,7 @@ class WP_Backup_Restore_Active {
                     $wpdb->query("START TRANSACTION");
                     $percent = 40 + min(40, floor(($q_count / max(1, $total_statements)) * 40));
                     $this->update_worker_state($task_id, [
-                        'message' => "数据库还原进度：$q_count / $total_statements 条SQL语句",
+                        'message' => sprintf( __( 'Database restore progress: %d / %d SQL statements', 'WP-Res' ), $q_count, $total_statements ),
                         'percent' => $percent
                     ]);
                 }
@@ -430,35 +439,35 @@ class WP_Backup_Restore_Active {
         $wpdb->query("COMMIT");
         fclose($handle);
     }
-    
+
     private function replace_domain_safe($old, $new) {
         global $wpdb;
         $old_esc = esc_sql($old);
         $new_esc = esc_sql($new);
-        $this->log_message( "开始执行 replace_domain_safe: $old -> $new", 'INFO' );
+        $this->log_message( sprintf( __( 'Starting replace_domain_safe: %s -> %s', 'WP-Res' ), $old, $new ), 'INFO' );
         $sql1 = "UPDATE {$wpdb->options} SET option_value = '$new_esc' WHERE option_name IN ('siteurl','home')";
-        $this->log_message( "执行SQL: $sql1", 'DEBUG' );
+        $this->log_message( $sql1, 'DEBUG' );
         $result1 = $wpdb->query($sql1);
-        $this->log_message( "更新 siteurl/home，影响行数: " . ($result1 !== false ? $result1 : '失败'), 'INFO' );
+        $this->log_message( sprintf( __( 'Updated siteurl/home, rows affected: %s', 'WP-Res' ), ($result1 !== false ? $result1 : 'failed') ), 'INFO' );
         $sql2 = "UPDATE {$wpdb->posts} SET post_content = REPLACE(post_content, '$old_esc', '$new_esc')";
-        $this->log_message( "执行SQL: $sql2", 'DEBUG' );
+        $this->log_message( $sql2, 'DEBUG' );
         $result2 = $wpdb->query($sql2);
-        $this->log_message( "更新 post_content，影响行数: " . ($result2 !== false ? $result2 : '失败'), 'INFO' );
+        $this->log_message( sprintf( __( 'Updated post_content, rows affected: %s', 'WP-Res' ), ($result2 !== false ? $result2 : 'failed') ), 'INFO' );
         $sql3 = "UPDATE {$wpdb->posts} SET guid = REPLACE(guid, '$old_esc', '$new_esc')";
-        $this->log_message( "执行SQL: $sql3", 'DEBUG' );
+        $this->log_message( $sql3, 'DEBUG' );
         $result3 = $wpdb->query($sql3);
-        $this->log_message( "更新 guid，影响行数: " . ($result3 !== false ? $result3 : '失败'), 'INFO' );
+        $this->log_message( sprintf( __( 'Updated guid, rows affected: %s', 'WP-Res' ), ($result3 !== false ? $result3 : 'failed') ), 'INFO' );
         $this->deep_replace($wpdb->options, 'option_id', 'option_value', $old, $new);
         $sql4 = "UPDATE {$wpdb->postmeta} SET meta_value = REPLACE(meta_value, '$old_esc', '$new_esc')";
-        $this->log_message( "执行SQL: $sql4", 'DEBUG' );
+        $this->log_message( $sql4, 'DEBUG' );
         $result4 = $wpdb->query($sql4);
-        $this->log_message( "更新 postmeta，影响行数: " . ($result4 !== false ? $result4 : '失败'), 'INFO' );
+        $this->log_message( sprintf( __( 'Updated postmeta, rows affected: %s', 'WP-Res' ), ($result4 !== false ? $result4 : 'failed') ), 'INFO' );
         $wpdb->query('COMMIT');
-        $this->log_message( "已执行 COMMIT", 'INFO' );
+        $this->log_message( __( 'COMMIT executed', 'WP-Res' ), 'INFO' );
         wp_cache_flush();
-        $this->log_message( "replace_domain_safe 执行完毕", 'INFO' );
+        $this->log_message( __( 'replace_domain_safe completed', 'WP-Res' ), 'INFO' );
     }
-    
+
     private function deep_replace($table, $id_col, $val_col, $old, $new) {
         global $wpdb;
         $like = '%' . esc_sql($old) . '%';
@@ -473,7 +482,7 @@ class WP_Backup_Restore_Active {
             }
         }
     }
-    
+
     private function recursive_replace($data, $old, $new) {
         if (is_string($data)) {
             if (is_serialized($data)) {
@@ -487,7 +496,7 @@ class WP_Backup_Restore_Active {
         }
         return $data;
     }
-    
+
     private function preserve_session_enhanced($cookie_string) {
         global $wpdb;
         if (preg_match('/(wordpress_logged_in_[a-f0-9]{32})=([^;]+)/', $cookie_string, $matches)) {
@@ -518,42 +527,42 @@ class WP_Backup_Restore_Active {
                     ]);
                     wp_cache_delete($user->ID, 'users');
                     wp_cache_delete($user->ID, 'user_meta');
-                    $this->log_message( "Session 恢复成功，用户: $username", 'DEBUG' );
+                    $this->log_message( sprintf( __( 'Session restored successfully, user: %s', 'WP-Res' ), $username ), 'DEBUG' );
                 }
             }
         }
     }
-    
+
     private function get_file_list($root, $exclude) {
         $files = []; $ex_real = str_replace('\\','/',realpath($exclude));
         $iter = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, RecursiveDirectoryIterator::SKIP_DOTS));
-        foreach($iter as $f) { 
-            $p = str_replace('\\','/',$f->getRealPath()); 
-            if ($ex_real && strpos($p, $ex_real)===0) continue; 
-            if ($f->isFile()) $files[] = $p; 
+        foreach($iter as $f) {
+            $p = str_replace('\\','/',$f->getRealPath());
+            if ($ex_real && strpos($p, $ex_real)===0) continue;
+            if ($f->isFile()) $files[] = $p;
         }
         return $files;
     }
-    
+
     private function swap_temp_tables($prefix) {
         global $wpdb;
         $tables = $wpdb->get_results("SHOW TABLES LIKE '{$prefix}%'", ARRAY_N);
-        $this->log_message( "开始切换临时表，共 " . count($tables) . " 个", 'DEBUG' );
+        $this->log_message( sprintf( __( 'Swapping temporary tables, total %d tables', 'WP-Res' ), count($tables) ), 'DEBUG' );
         foreach($tables as $t) {
             $temp = $t[0]; $real = substr($temp, strlen($prefix));
             $wpdb->query("DROP TABLE IF EXISTS `$real` ");
             $wpdb->query("RENAME TABLE `$temp` TO `$real` ");
         }
-        $this->log_message( "表切换完成", 'DEBUG' );
+        $this->log_message( __( 'Table swap completed', 'WP-Res' ), 'DEBUG' );
     }
-    
+
     private function remove_directory($dir) {
         if(!is_dir($dir)) return;
         $files = array_diff(scandir($dir), ['.','..']);
         foreach($files as $f) (is_dir("$dir/$f")) ? $this->remove_directory("$dir/$f") : unlink("$dir/$f");
         @rmdir($dir);
     }
-    
+
     public function cleanup_temp_files($task_id) {
         $dir = $this->get_backup_dir();
         $this->remove_directory($dir . '/temp_' . $task_id);
@@ -561,7 +570,7 @@ class WP_Backup_Restore_Active {
         @unlink(rtrim(ABSPATH, '/\\') . '/database.sql');
         @unlink(rtrim(ABSPATH, '/\\') . '/siteinfo.json');
     }
-    
+
     public function cleanup_orphaned_temp() {
         $dir = $this->get_backup_dir();
         foreach (glob($dir . '/temp_*') as $t) {
@@ -575,24 +584,24 @@ class WP_Backup_Restore_Active {
         $worker_log = $dir . '/worker_debug.log';
         if (file_exists($worker_log) && filesize($worker_log) > self::MAX_LOG_SIZE) @unlink($worker_log);
     }
-    
+
     public function get_backup_list() {
         $dir = $this->get_backup_dir();
         return glob($dir . '/*.bgbk') ?: [];
     }
-    
+
     // ==================== AJAX 方法 ====================
-    
+
     public function ajax_download_backup() {
         while (ob_get_level()) ob_end_clean();
-        if ( ! current_user_can( 'manage_options' ) ) wp_die( '无权限', '', array( 'response' => 403 ) );
-        if ( ! wp_verify_nonce( $_GET['_wpnonce'], 'wp_backup_action' ) ) wp_die( '无效请求', '', array( 'response' => 403 ) );
+        if ( ! current_user_can( 'manage_options' ) ) wp_die( __( 'Permission denied', 'WP-Res' ), '', array( 'response' => 403 ) );
+        if ( ! wp_verify_nonce( $_GET['_wpnonce'], 'wp_backup_action' ) ) wp_die( __( 'Invalid request', 'WP-Res' ), '', array( 'response' => 403 ) );
         $file = isset( $_GET['file'] ) ? sanitize_text_field( $_GET['file'] ) : '';
-        if ( empty( $file ) ) wp_die( '文件参数缺失', '', array( 'response' => 400 ) );
+        if ( empty( $file ) ) wp_die( __( 'Missing file parameter', 'WP-Res' ), '', array( 'response' => 400 ) );
         $backup_dir = $this->get_backup_dir();
         $real_path = realpath( $backup_dir . '/' . basename( $file ) );
         if ( ! $real_path || strpos( $real_path, $backup_dir ) !== 0 || ! file_exists( $real_path ) ) {
-            wp_die( '无效文件', '', array( 'response' => 404 ) );
+            wp_die( __( 'Invalid file', 'WP-Res' ), '', array( 'response' => 404 ) );
         }
         header( 'Content-Description: File Transfer' );
         header( 'Content-Type: application/octet-stream' );
@@ -604,53 +613,54 @@ class WP_Backup_Restore_Active {
         readfile( $real_path );
         exit;
     }
-    
+
     public function ajax_delete_backup() {
-        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( '无权限' );
-        if ( ! wp_verify_nonce( $_POST['_wpnonce'], 'wp_backup_action' ) ) wp_send_json_error( '无效请求' );
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( __( 'Permission denied', 'WP-Res' ) );
+        if ( ! wp_verify_nonce( $_POST['_wpnonce'], 'wp_backup_action' ) ) wp_send_json_error( __( 'Invalid request', 'WP-Res' ) );
         $file = isset( $_POST['file'] ) ? sanitize_text_field( $_POST['file'] ) : '';
-        if ( empty( $file ) ) wp_send_json_error( '文件参数缺失' );
+        if ( empty( $file ) ) wp_send_json_error( __( 'Missing file parameter', 'WP-Res' ) );
         $backup_dir = $this->get_backup_dir();
         $real_path = realpath( $backup_dir . '/' . basename( $file ) );
         if ( ! $real_path || strpos( $real_path, $backup_dir ) !== 0 || ! file_exists( $real_path ) ) {
-            wp_send_json_error( '无效文件' );
+            wp_send_json_error( __( 'Invalid file', 'WP-Res' ) );
         }
         if ( unlink( $real_path ) ) {
-            wp_send_json_success( [ 'message' => '已删除' ] );
+            wp_send_json_success( [ 'message' => __( 'Deleted', 'WP-Res' ) ] );
         } else {
-            wp_send_json_error( '删除失败' );
+            wp_send_json_error( __( 'Deletion failed', 'WP-Res' ) );
         }
     }
-    
+
     public function ajax_upload_chunk() {
-        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( '无权限' );
-        if ( ! wp_verify_nonce( $_POST['_wpnonce'], 'wp_backup_action' ) ) wp_send_json_error( '无效请求' );
-        
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( __( 'Permission denied', 'WP-Res' ) );
+        if ( ! wp_verify_nonce( $_POST['_wpnonce'], 'wp_backup_action' ) ) wp_send_json_error( __( 'Invalid request', 'WP-Res' ) );
+
         $filename = isset( $_POST['filename'] ) ? sanitize_file_name( $_POST['filename'] ) : '';
         $start = isset( $_POST['start'] ) ? intval( $_POST['start'] ) : -1;
         $end = isset( $_POST['end'] ) ? intval( $_POST['end'] ) : -1;
-        $file_size = isset( $_POST['file_size'] ) ? intval( $_POST['file_size'] ) : 0;
-        
+        // 修复：使用字符串保留完整文件大小，避免 intval 溢出导致 TaskID 不一致
+        $file_size = isset( $_POST['file_size'] ) ? (string) $_POST['file_size'] : '0';
+
         if ( empty( $filename ) || $start < 0 || $end <= $start || ! isset( $_FILES['file_chunk'] ) ) {
-            wp_send_json_error( '参数错误' );
+            wp_send_json_error( __( 'Invalid parameters', 'WP-Res' ) );
         }
-        
+
         $chunk = $_FILES['file_chunk'];
         if ( $chunk['error'] !== UPLOAD_ERR_OK ) {
-            wp_send_json_error( '分片上传错误' );
+            wp_send_json_error( __( 'Chunk upload error', 'WP-Res' ) );
         }
-        
+
         $backup_dir = $this->get_backup_dir();
         $temp_dir = $backup_dir . '/upload_temp';
         if ( ! is_dir( $temp_dir ) ) wp_mkdir_p( $temp_dir );
-        
+
         $task_id = md5( $filename . $file_size . get_current_user_id() );
         $part_file = $temp_dir . '/' . $task_id . '_' . $start . '_' . $end . '.part';
-        
+
         if ( ! move_uploaded_file( $chunk['tmp_name'], $part_file ) ) {
-            wp_send_json_error( '保存分片失败' );
+            wp_send_json_error( __( 'Failed to save chunk', 'WP-Res' ) );
         }
-        
+
         $meta_file = $temp_dir . '/' . $task_id . '_meta.json';
         $meta = file_exists( $meta_file ) ? json_decode( file_get_contents( $meta_file ), true ) : [];
         $meta['filename'] = $filename;
@@ -659,13 +669,13 @@ class WP_Backup_Restore_Active {
         $meta['parts'][] = [ 'start' => $start, 'end' => $end ];
         $meta['parts'] = array_unique( $meta['parts'], SORT_REGULAR );
         file_put_contents( $meta_file, json_encode( $meta ) );
-        
+
         $covered = $this->is_range_fully_covered( $meta['parts'], $file_size );
         if ( $covered ) {
             $final_file = $backup_dir . '/' . $filename;
             $handle = fopen( $final_file, 'wb' );
             if ( ! $handle ) {
-                wp_send_json_error( '无法创建最终文件，请检查目录权限' );
+                wp_send_json_error( __( 'Cannot create final file, please check directory permissions', 'WP-Res' ) );
             }
             usort( $meta['parts'], function($a, $b) { return $a['start'] - $b['start']; } );
             foreach ( $meta['parts'] as $part ) {
@@ -673,7 +683,7 @@ class WP_Backup_Restore_Active {
                 if ( ! file_exists( $part_path ) ) {
                     fclose( $handle );
                     @unlink( $final_file );
-                    wp_send_json_error( '分片文件丢失，合并失败' );
+                    wp_send_json_error( __( 'Chunk file missing, merge failed', 'WP-Res' ) );
                 }
                 fseek( $handle, $part['start'] );
                 $part_handle = fopen( $part_path, 'rb' );
@@ -686,12 +696,13 @@ class WP_Backup_Restore_Active {
             fclose( $handle );
             unlink( $meta_file );
             @rmdir( $temp_dir );
-            wp_send_json_success( [ 'message' => '上传并合并完成' ] );
+            // 返回明确的状态，前端据此判断是否完成
+            wp_send_json_success( [ 'status' => 'success', 'message' => __( 'Upload and merge completed', 'WP-Res' ) ] );
         } else {
-            wp_send_json_success( [ 'message' => '分片接收成功' ] );
+            wp_send_json_success( [ 'status' => 'processing', 'message' => __( 'Chunk received', 'WP-Res' ) ] );
         }
     }
-    
+
     private function is_range_fully_covered( $parts, $size ) {
         if ( empty( $parts ) ) return false;
         usort( $parts, function($a, $b) { return $a['start'] - $b['start']; } );
@@ -700,21 +711,23 @@ class WP_Backup_Restore_Active {
             if ( $part['start'] > $covered ) return false;
             $covered = max( $covered, $part['end'] );
         }
-        return $covered >= $size;
+        // $size 可能是字符串（大文件），转为整数比较前确保数值
+        $size_int = (int) $size;
+        return $covered >= $size_int;
     }
-    
+
     public function ajax_upload_status() {
-        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( '无权限' );
-        if ( ! wp_verify_nonce( $_POST['_wpnonce'], 'wp_backup_action' ) ) wp_send_json_error( '无效请求' );
-        
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( __( 'Permission denied', 'WP-Res' ) );
+        if ( ! wp_verify_nonce( $_POST['_wpnonce'], 'wp_backup_action' ) ) wp_send_json_error( __( 'Invalid request', 'WP-Res' ) );
+
         $filename = isset( $_POST['filename'] ) ? sanitize_file_name( $_POST['filename'] ) : '';
-        $file_size = isset( $_POST['file_size'] ) ? intval( $_POST['file_size'] ) : 0;
-        if ( empty( $filename ) ) wp_send_json_error( '参数错误' );
-        
+        $file_size = isset( $_POST['file_size'] ) ? (string) $_POST['file_size'] : '0';
+        if ( empty( $filename ) ) wp_send_json_error( __( 'Invalid parameters', 'WP-Res' ) );
+
         $temp_dir = $this->get_backup_dir() . '/upload_temp';
         $task_id = md5( $filename . $file_size . get_current_user_id() );
         $meta_file = $temp_dir . '/' . $task_id . '_meta.json';
-        
+
         if ( file_exists( $meta_file ) ) {
             $meta = json_decode( file_get_contents( $meta_file ), true );
             wp_send_json_success( [ 'parts' => $meta['parts'] ] );
@@ -722,28 +735,28 @@ class WP_Backup_Restore_Active {
             wp_send_json_success( [ 'parts' => [] ] );
         }
     }
-    
+
     public function ajax_upload_cancel() {
-        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( '无权限' );
-        if ( ! wp_verify_nonce( $_POST['_wpnonce'], 'wp_backup_action' ) ) wp_send_json_error( '无效请求' );
-        
+        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( __( 'Permission denied', 'WP-Res' ) );
+        if ( ! wp_verify_nonce( $_POST['_wpnonce'], 'wp_backup_action' ) ) wp_send_json_error( __( 'Invalid request', 'WP-Res' ) );
+
         $filename = isset( $_POST['filename'] ) ? sanitize_file_name( $_POST['filename'] ) : '';
-        $file_size = isset( $_POST['file_size'] ) ? intval( $_POST['file_size'] ) : 0;
-        if ( empty( $filename ) ) wp_send_json_error( '参数错误' );
-        
+        $file_size = isset( $_POST['file_size'] ) ? (string) $_POST['file_size'] : '0';
+        if ( empty( $filename ) ) wp_send_json_error( __( 'Invalid parameters', 'WP-Res' ) );
+
         $temp_dir = $this->get_backup_dir() . '/upload_temp';
         $task_id = md5( $filename . $file_size . get_current_user_id() );
         $pattern = $temp_dir . '/' . $task_id . '_*';
         foreach ( glob( $pattern ) as $file ) @unlink( $file );
         @unlink( $temp_dir . '/' . $task_id . '_meta.json' );
-        
-        wp_send_json_success( [ 'message' => '已中断并清理临时文件' ] );
+
+        wp_send_json_success( [ 'message' => __( 'Upload cancelled and temporary files cleaned', 'WP-Res' ) ] );
     }
-    
+
     // ==================== UI ====================
-    
+
     public function enqueue_scripts($hook) {
-        if ($hook !== 'tools_page_wp-backup-restore') return;
+        if ($hook !== 'tools_page_WP-Res') return;
         wp_enqueue_script( 'jquery' );
         wp_enqueue_style( 'dashicons' );
         wp_add_inline_style( 'dashicons', '
@@ -763,33 +776,92 @@ class WP_Backup_Restore_Active {
                 box-shadow: 0 1px 2px rgba(0,0,0,0.1);
             }
         ' );
-        wp_localize_script( 'jquery', 'wp_ajax', array(
-            'api_url' => plugins_url( 'restore-api.php', __FILE__ ),
-            'ajax_url' => admin_url( 'admin-ajax.php' ),
-            'current_level' => $this->log_level,
-            'nonce' => wp_create_nonce( 'wp_backup_action' )
-        ) );
+
+        // 本地化脚本，传递翻译字符串
+        $l10n = array(
+            'api_url'          => plugins_url( 'restore-api.php', __FILE__ ),
+            'ajax_url'         => admin_url( 'admin-ajax.php' ),
+            'current_level'    => $this->log_level,
+            'nonce'            => wp_create_nonce( 'wp_backup_action' ),
+            // UI 文本
+            'no_backup_selected' => __( 'Please select a backup file', 'WP-Res' ),
+            'delete_confirm'     => __( 'Are you sure you want to delete this backup file? This cannot be undone!', 'WP-Res' ),
+            'only_bgbk_allowed'  => __( 'Only .bgbk backup files are allowed.', 'WP-Res' ),
+            'upload_cancel_confirm' => __( 'Are you sure you want to cancel the upload and clean up temporary files?', 'WP-Res' ),
+            'restore_confirm'    => __( '⚠️ This operation will overwrite existing data and is irreversible! Continue?', 'WP-Res' ),
+            'disk_space_check'   => __( 'Disk Space Check', 'WP-Res' ),
+            'calculating_space'  => __( 'Calculating disk space, please wait...<br><span style="font-size:12px;">(May take a few seconds if the site has many files)</span>', 'WP-Res' ),
+            'backup_title'       => __( 'Full Site Backup in Progress', 'WP-Res' ),
+            'restore_title'      => __( 'Full Site Restore in Progress', 'WP-Res' ),
+            'backup_complete'    => __( '✔ Backup completed successfully!', 'WP-Res' ),
+            'restore_complete'   => __( '✔ Restore completed successfully!', 'WP-Res' ),
+            'backup_complete_msg' => __( 'All site files and database have been backed up.', 'WP-Res' ),
+            'restore_complete_msg' => __( 'All site data has been restored.<br><span style="color:#d63638;">Note: The database has been updated. Please refresh the page; you may need to log in again.</span>', 'WP-Res' ),
+            'error_occurred'     => __( '❌ Error: ', 'WP-Res' ),
+            'task_stopped'       => __( 'Task stopped manually, temporary files cleaned.', 'WP-Res' ),
+            'stopping_task'      => __( '⏸️ Stopping task and cleaning temporary files...', 'WP-Res' ),
+            'task_maybe_stopping' => __( 'Task may still be stopping, please refresh manually later.', 'WP-Res' ),
+            'stop_failed'        => __( 'Stop request failed: ', 'WP-Res' ),
+            'network_error'      => __( 'Network error, please check connection', 'WP-Res' ),
+            'unknown_error'      => __( 'Unknown error', 'WP-Res' ),
+            'check_failed'       => __( 'Check failed: ', 'WP-Res' ),
+            'request_failed'     => __( 'Request failed, please check network connection', 'WP-Res' ),
+            'delete_success'     => __( 'Deleted successfully', 'WP-Res' ),
+            'delete_failed'      => __( 'Deletion failed: ', 'WP-Res' ),
+            'upload_success'     => __( '✓ Upload successful, refreshing page...', 'WP-Res' ),
+            'upload_failed'      => __( '✗ Upload failed: ', 'WP-Res' ),
+            'upload_cancelled'   => __( 'Upload cancelled, temporary files cleaned', 'WP-Res' ),
+            'upload_cancel_failed' => __( 'Cancel failed: ', 'WP-Res' ),
+            'preparing_upload'   => __( 'Preparing upload, dynamic chunk size ', 'WP-Res' ),
+            'remaining_intervals' => __( 'remaining intervals', 'WP-Res' ),
+            'chunk_upload_success' => __( 'Chunk upload successful (', 'WP-Res' ),
+            'chunk_upload_failed' => __( 'Chunk upload failed, retrying (', 'WP-Res' ),
+            'retry_attempt'       => __( 'attempt', 'WP-Res' ),
+            'network_good'       => __( 'Network good, chunk size increased to ', 'WP-Res' ),
+            'chunk_too_large'    => __( 'Chunk too large, reduced to ', 'WP-Res' ),
+            'copy_path_success'  => __( 'Path copied', 'WP-Res' ),
+            'log_level_saved'    => __( 'Saved', 'WP-Res' ),
+            'log_level_save_failed' => __( 'Save failed', 'WP-Res' ),
+            'button_backup'      => __( 'Backup Now', 'WP-Res' ),
+            'button_download'    => __( 'Download', 'WP-Res' ),
+            'button_delete'      => __( 'Delete', 'WP-Res' ),
+            'button_upload'      => __( 'Upload Backup', 'WP-Res' ),
+            'button_cancel_upload' => __( 'Cancel Upload', 'WP-Res' ),
+            'button_restore'     => __( 'Full Site Restore', 'WP-Res' ),
+            'log_label'          => __( '📋 Debug Log Level:', 'WP-Res' ),
+            'log_file_info'      => __( '📁 Log file: ', 'WP-Res' ),
+            'copy_path'          => __( '📋 Copy path', 'WP-Res' ),
+            'modal_title_processing' => __( 'Processing Task', 'WP-Res' ),
+            'modal_button_stop'  => __( 'Stop Task', 'WP-Res' ),
+            'modal_button_cancel' => __( 'Cancel', 'WP-Res' ),
+            'modal_button_confirm' => __( 'Confirm', 'WP-Res' ),
+            'modal_button_continue' => __( 'Continue', 'WP-Res' ),
+            'modal_button_continue_risk' => __( 'Continue Anyway (Risk Assumed)', 'WP-Res' ),
+            'space_check_loading' => __( 'Disk Space Check', 'WP-Res' ),
+            'space_check_msg'    => __( 'Calculating disk space, please wait...<br><span style="font-size:12px;">(May take a few seconds if the site has many files)</span>', 'WP-Res' ),
+        );
+        wp_localize_script( 'jquery', 'wp_backup_l10n', $l10n );
     }
-    
+
     public function add_admin_menu() {
-        add_management_page( 'WP备份还原', 'WP备份还原', 'manage_options', 'wp-backup-restore', array( $this, 'admin_page' ) );
+        add_management_page( __( 'WP Backup Restore', 'WP-Res' ), __( 'WP Backup Restore', 'WP-Res' ), 'manage_options', 'WP-Res', array( $this, 'admin_page' ) );
     }
-    
+
     public function admin_page() {
         $backups = $this->get_backup_list();
         ?>
         <div class="wrap">
-            <h1 style="font-weight:600; margin-bottom:24px;">🔄 WP一键备份还原</h1>
+            <h1 style="font-weight:600; margin-bottom:24px;"><?php _e( '🔄 WP Backup Restore', 'WP-Res' ); ?></h1>
             <div class="wp-backup-card">
                 <div style="margin-bottom:20px;">
                     <button id="btn-bak" class="button button-primary button-large" style="display:inline-flex; align-items:center; gap:6px;">
-                        <span class="dashicons dashicons-backup"></span> 立即备份
+                        <span class="dashicons dashicons-backup"></span> <?php _e( 'Backup Now', 'WP-Res' ); ?>
                     </button>
                 </div>
                 <div style="margin-bottom:12px; display:flex; flex-wrap:wrap; align-items:center; gap:12px;">
                     <select id="sel-bak" style="min-width:260px; max-width:100%;">
                         <?php if(empty($backups)): ?>
-                            <option value="">暂无备份文件</option>
+                            <option value=""><?php _e( 'No backup files', 'WP-Res' ); ?></option>
                         <?php else: ?>
                             <?php foreach($backups as $f): ?>
                                 <option value="<?php echo esc_attr($f); ?>"><?php echo esc_html(basename($f)); ?></option>
@@ -797,18 +869,18 @@ class WP_Backup_Restore_Active {
                         <?php endif; ?>
                     </select>
                     <button id="btn-download" class="button button-secondary" style="display:inline-flex; align-items:center; gap:6px;">
-                        <span class="dashicons dashicons-download"></span> 下载
+                        <span class="dashicons dashicons-download"></span> <?php _e( 'Download', 'WP-Res' ); ?>
                     </button>
                     <button id="btn-delete" class="button button-secondary button-danger" style="display:inline-flex; align-items:center; gap:6px;">
-                        <span class="dashicons dashicons-trash"></span> 删除
+                        <span class="dashicons dashicons-trash"></span> <?php _e( 'Delete', 'WP-Res' ); ?>
                     </button>
                 </div>
                 <div style="margin-bottom:20px;">
                     <button id="btn-upload" class="button button-secondary" style="display:inline-flex; align-items:center; gap:6px;">
-                        <span class="dashicons dashicons-upload"></span> 上传备份
+                        <span class="dashicons dashicons-upload"></span> <?php _e( 'Upload Backup', 'WP-Res' ); ?>
                     </button>
                     <button id="btn-cancel-upload" class="button button-secondary button-danger" style="display:inline-flex; align-items:center; gap:6px; margin-left:10px; display:none;">
-                        <span class="dashicons dashicons-no-alt"></span> 中断上传
+                        <span class="dashicons dashicons-no-alt"></span> <?php _e( 'Cancel Upload', 'WP-Res' ); ?>
                     </button>
                     <input type="file" id="upload-file-input" accept=".bgbk" style="display:none;">
                     <div id="upload-progress-container" style="display:none; margin-top:10px;">
@@ -820,87 +892,88 @@ class WP_Backup_Restore_Active {
                 </div>
                 <div style="margin-bottom:20px;">
                     <button id="btn-res" class="button restore-danger-btn" style="display:inline-flex; align-items:center; gap:6px;">
-                        <span style="font-size:1.2em;">↩️</span> 全站还原
+                        <span style="font-size:1.2em;">↩️</span> <?php _e( 'Full Site Restore', 'WP-Res' ); ?>
                     </button>
                 </div>
                 <hr style="margin:20px 0;">
                 <div class="log-area">
-                    <label><strong>📋 调试日志级别：</strong></label>
+                    <label><strong><?php _e( '📋 Debug Log Level:', 'WP-Res' ); ?></strong></label>
                     <select id="log-level" style="margin-left:12px; border-radius:4px;">
-                        <option value="OFF" <?php selected( $this->log_level, 'OFF' ); ?>>OFF</option>
-                        <option value="ERROR" <?php selected( $this->log_level, 'ERROR' ); ?>>ERROR</option>
-                        <option value="WARNING" <?php selected( $this->log_level, 'WARNING' ); ?>>WARNING</option>
-                        <option value="INFO" <?php selected( $this->log_level, 'INFO' ); ?>>INFO</option>
-                        <option value="DEBUG" <?php selected( $this->log_level, 'DEBUG' ); ?>>DEBUG</option>
+                        <option value="OFF" <?php selected( $this->log_level, 'OFF' ); ?>><?php _e( 'OFF', 'WP-Res' ); ?></option>
+                        <option value="ERROR" <?php selected( $this->log_level, 'ERROR' ); ?>><?php _e( 'ERROR', 'WP-Res' ); ?></option>
+                        <option value="WARNING" <?php selected( $this->log_level, 'WARNING' ); ?>><?php _e( 'WARNING', 'WP-Res' ); ?></option>
+                        <option value="INFO" <?php selected( $this->log_level, 'INFO' ); ?>><?php _e( 'INFO', 'WP-Res' ); ?></option>
+                        <option value="DEBUG" <?php selected( $this->log_level, 'DEBUG' ); ?>><?php _e( 'DEBUG', 'WP-Res' ); ?></option>
                     </select>
                     <span id="log-save-status" style="margin-left:12px; color:#00a32a;"></span>
                     <p class="description" style="margin-top:10px;">
-                        📁 日志文件：<code><?php echo esc_html( $this->get_backup_dir() . '/restore.log' ); ?></code>
-                        <a href="javascript:void(0);" id="copy-log-path" class="copy-path-btn">📋 复制路径</a>
+                        <?php _e( '📁 Log file:', 'WP-Res' ); ?> <code><?php echo esc_html( $this->get_backup_dir() . '/restore.log' ); ?></code>
+                        <a href="javascript:void(0);" id="copy-log-path" class="copy-path-btn"><?php _e( '📋 Copy path', 'WP-Res' ); ?></a>
                     </p>
                 </div>
             </div>
         </div>
-        
+
         <div id="modal-progress" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:100000; text-align:center; padding-top:150px;">
             <div style="background:#fff; width:500px; margin:0 auto; padding:25px 30px 30px; border-radius:12px; box-shadow:0 5px 20px rgba(0,0,0,0.3); text-align:left;">
-                <h3 id="modal-title" style="margin:0 0 20px; font-size:18px; border-bottom:1px solid #ddd; padding-bottom:10px;">正在处理任务</h3>
+                <h3 id="modal-title" style="margin:0 0 20px; font-size:18px; border-bottom:1px solid #ddd; padding-bottom:10px;"><?php _e( 'Processing Task', 'WP-Res' ); ?></h3>
                 <div style="background:#f0f0f0; height:32px; border-radius:16px; overflow:hidden; margin:20px 0; position:relative;">
                     <div id="progress-bar" style="background:#0073aa; width:0%; height:100%; transition:width 0.3s; color:#fff; line-height:32px; text-align:center; font-weight:bold;">0%</div>
                 </div>
-                <div id="progress-msg" style="font-size:14px; color:#555; margin:10px 0 20px; word-break:break-word;">准备中...</div>
+                <div id="progress-msg" style="font-size:14px; color:#555; margin:10px 0 20px; word-break:break-word;"><?php _e( 'Preparing...', 'WP-Res' ); ?></div>
                 <div style="text-align:right;">
-                    <button id="stop-btn" class="button button-secondary" style="margin-right:10px;">停止任务</button>
-                    <button id="cancel-modal-btn" class="button button-secondary modal-cancel-btn" style="display:none;">取消</button>
-                    <button id="confirm-btn" class="button button-primary" style="display:none;">确定</button>
+                    <button id="stop-btn" class="button button-secondary" style="margin-right:10px;"><?php _e( 'Stop Task', 'WP-Res' ); ?></button>
+                    <button id="cancel-modal-btn" class="button button-secondary modal-cancel-btn" style="display:none;"><?php _e( 'Cancel', 'WP-Res' ); ?></button>
+                    <button id="confirm-btn" class="button button-primary" style="display:none;"><?php _e( 'Confirm', 'WP-Res' ); ?></button>
                 </div>
             </div>
         </div>
-        
+
         <script>
         jQuery(document).ready(function($) {
-            var apiUrl = wp_ajax.api_url;
-            var ajaxUrl = wp_ajax.ajax_url;
-            var nonce = wp_ajax.nonce;
+            var l10n = wp_backup_l10n;
+            var apiUrl = l10n.api_url;
+            var ajaxUrl = l10n.ajax_url;
+            var nonce = l10n.nonce;
             var currentTaskId = null;
             var currentType = null;
             var pollInterval = null;
             var isStopping = false;
-            
+
             // 显示等待模态窗（用于空间检查时的 Loading）
             function showWaitingModal() {
                 resetConfirmButton();
-                $('#modal-title').text('磁盘空间检查');
+                $('#modal-title').text(l10n.space_check_loading);
                 $('#progress-bar').hide();
-                $('#progress-msg').html('正在计算磁盘空间，请稍候...<br><span style="font-size:12px;">(若站点文件较多，可能需要几秒钟)</span>');
+                $('#progress-msg').html(l10n.space_check_msg);
                 $('#stop-btn').hide();
                 $('#confirm-btn').hide();
                 $('#cancel-modal-btn').hide();
                 $('#modal-progress').show();
             }
-            
+
             // 通用模态窗确认（用于显示检查结果）
-			function showModalWithConfirm(title, message, canProceed, onConfirm, extraWarning) {
-				resetConfirmButton();
-				$('#modal-title').text(title);
-				$('#progress-bar').hide();               // 空间检查时不需要进度条
-				$('#progress-msg').html(message.replace(/\n/g, '<br>') + (extraWarning ? '<br><br><span style="color:#d63638;">⚠️ 额外风险提示：</span><br>' + extraWarning : ''));
-				$('#stop-btn').hide();
-				$('#cancel-modal-btn').show().text('取消').off('click').click(closeModal);
-				if (canProceed) {
-					$('#confirm-btn').show().text('继续').off('click').click(function() {
-						closeModal();
-						onConfirm();
-					});
-				} else {
-					$('#confirm-btn').show().text('仍然继续（风险自担）').off('click').click(function() {
-						closeModal();
-						onConfirm();
-					});
-				}
-				$('#modal-progress').show();
-			}
-            
+            function showModalWithConfirm(title, message, canProceed, onConfirm, extraWarning) {
+                resetConfirmButton();
+                $('#modal-title').text(title);
+                $('#progress-bar').hide();               // 空间检查时不需要进度条
+                $('#progress-msg').html(message.replace(/\n/g, '<br>') + (extraWarning ? '<br><br><span style="color:#d63638;">⚠️ ' + l10n.extra_risk_warning + '</span><br>' + extraWarning : ''));
+                $('#stop-btn').hide();
+                $('#cancel-modal-btn').show().text(l10n.modal_button_cancel).off('click').click(closeModal);
+                if (canProceed) {
+                    $('#confirm-btn').show().text(l10n.modal_button_continue).off('click').click(function() {
+                        closeModal();
+                        onConfirm();
+                    });
+                } else {
+                    $('#confirm-btn').show().text(l10n.modal_button_continue_risk).off('click').click(function() {
+                        closeModal();
+                        onConfirm();
+                    });
+                }
+                $('#modal-progress').show();
+            }
+
             // 备份按钮：先显示等待，再检查空间
             $('#btn-bak').click(function() {
                 showWaitingModal();
@@ -912,25 +985,25 @@ class WP_Backup_Restore_Active {
                     closeModal(); // 关闭等待模态窗
                     if (res.success) {
                         var data = res.data;
-                        var msg = data.message + '\n可用空间：' + data.free + '\n需要空间：' + data.required;
-                        showModalWithConfirm('磁盘空间检查', msg, data.enough, function() {
-                            startTask('backup_start', {}, '全站备份进行中');
+                        var msg = data.message + '\n' + l10n.available_space + '：' + data.free + '\n' + l10n.required_space + '：' + data.required;
+                        showModalWithConfirm(l10n.disk_space_check, msg, data.enough, function() {
+                            startTask('backup_start', {}, l10n.backup_title);
                         }, data.zip64_warning);
                     } else {
-                        alert('检查失败：' + (res.data || '未知错误'));
+                        alert(l10n.check_failed + (res.data || l10n.unknown_error));
                     }
                 }, 'json').fail(function() {
                     closeModal();
-                    alert('请求失败，请检查网络连接');
+                    alert(l10n.request_failed);
                 });
             });
-            
+
             // 还原按钮：先显示等待，再检查空间
             $('#btn-res').click(function() {
                 var file = $('#sel-bak').val();
                 if (!file) {
-                    showModal('提示', true);
-                    $('#progress-msg').html('请先选择一个备份文件。');
+                    showModal(l10n.no_backup_selected, true);
+                    $('#progress-msg').html(l10n.select_backup_first);
                     $('#confirm-btn').hide();
                     $('#cancel-modal-btn').show();
                     return;
@@ -945,49 +1018,49 @@ class WP_Backup_Restore_Active {
                     closeModal();
                     if (res.success) {
                         var data = res.data;
-                        var msg = data.message + '\n可用空间：' + data.free + '\n需要空间：' + data.required;
-                        showModalWithConfirm('磁盘空间检查', msg, data.enough, function() {
+                        var msg = data.message + '\n' + l10n.available_space + '：' + data.free + '\n' + l10n.required_space + '：' + data.required;
+                        showModalWithConfirm(l10n.disk_space_check, msg, data.enough, function() {
                             // 继续原有还原确认流程
-                            showModal('确认还原', true);
-                            $('#progress-msg').html('⚠️ 此操作将覆盖现有数据，不可逆！确认要继续吗？');
+                            showModal(l10n.restore_confirm, true);
+                            $('#progress-msg').html(l10n.restore_confirm_msg);
                             $('#confirm-btn').one('click', function() {
                                 closeModal();
-                                startTask('restore_start', { 
+                                startTask('restore_start', {
                                     backup_file: file,
                                     browser_cookie: document.cookie,
                                     current_url: window.location.origin
-                                }, '全站还原进行中');
+                                }, l10n.restore_title);
                             });
                             $('#cancel-modal-btn').one('click', closeModal);
                         }, data.zip64_warning);
                     } else {
-                        alert('检查失败：' + (res.data || '未知错误'));
+                        alert(l10n.check_failed + (res.data || l10n.unknown_error));
                     }
                 }, 'json').fail(function() {
                     closeModal();
-                    alert('请求失败，请检查网络连接');
+                    alert(l10n.request_failed);
                 });
             });
-            
+
             // ========== 以下为下载、删除、上传、备份还原轮询等 ==========
             $('#btn-download').click(function(e) {
                 e.preventDefault();
                 var file = $('#sel-bak').val();
-                if (!file) { alert('请选择一个备份文件'); return; }
+                if (!file) { alert(l10n.no_backup_selected); return; }
                 window.location.href = ajaxUrl + '?action=wp_backup_download&file=' + encodeURIComponent(file) + '&_wpnonce=' + nonce;
             });
-            
+
             $('#btn-delete').click(function() {
                 var file = $('#sel-bak').val();
-                if (!file) { alert('请选择一个备份文件'); return; }
-                if (!confirm('确定要删除此备份文件吗？不可恢复！')) return;
+                if (!file) { alert(l10n.no_backup_selected); return; }
+                if (!confirm(l10n.delete_confirm)) return;
                 $.post(ajaxUrl, { action: 'wp_backup_delete', file: file, _wpnonce: nonce }, function(res) {
-                    if (res.success) { alert('删除成功'); location.reload(); }
-                    else { alert('删除失败：' + (res.data || res.message || '未知错误')); }
-                }, 'json').fail(function() { alert('请求失败，请检查网络连接'); });
+                    if (res.success) { alert(l10n.delete_success); location.reload(); }
+                    else { alert(l10n.delete_failed + (res.data || res.message || l10n.unknown_error)); }
+                }, 'json').fail(function() { alert(l10n.request_failed); });
             });
-            
-			// ========== 动态分片上传 ==========
+
+            // ========== 动态分片上传 ==========
             let currentFile = null;
             let currentChunkSize = 2 * 1024 * 1024;
             let minChunkSize = 512 * 1024;
@@ -996,9 +1069,9 @@ class WP_Backup_Restore_Active {
             let uploadedParts = [];
             let isUploading = false;
             let maxRetries = 5;
-            
+
             function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-            
+
             async function uploadChunkWithRetry(formData, start, attempt = 1) {
                 return new Promise((resolve, reject) => {
                     const xhr = new XMLHttpRequest();
@@ -1012,28 +1085,28 @@ class WP_Backup_Restore_Active {
                                     consecutiveSuccess++;
                                     if (consecutiveSuccess >= 3 && currentChunkSize < maxChunkSize) {
                                         currentChunkSize = Math.min(currentChunkSize * 2, maxChunkSize);
-                                        $('#upload-status').append(`<br><small>网络良好，分片大小提升至 ${(currentChunkSize/1024/1024).toFixed(1)}MB</small>`);
+                                        $('#upload-status').append('<br><small>' + l10n.network_good + (currentChunkSize/1024/1024).toFixed(1) + 'MB</small>');
                                         consecutiveSuccess = 0;
                                     }
                                     resolve(res);
                                 } else {
-                                    reject(new Error(res.data || '上传失败'));
+                                    reject(new Error(res.data || l10n.upload_failed));
                                 }
                             } catch(e) { reject(e); }
                         } else if (xhr.status === 413) {
                             currentChunkSize = Math.max(currentChunkSize / 2, minChunkSize);
-                            $('#upload-status').html(`<span style="color:#d63638;">单片过大，已降低至 ${(currentChunkSize/1024/1024).toFixed(1)}MB，重试中...</span>`);
+                            $('#upload-status').html('<span style="color:#d63638;">' + l10n.chunk_too_large + (currentChunkSize/1024/1024).toFixed(1) + 'MB, retrying...</span>');
                             reject(new Error('Chunk too large'));
                         } else {
-                            reject(new Error(`HTTP ${xhr.status}`));
+                            reject(new Error('HTTP ' + xhr.status));
                         }
                     };
-                    xhr.onerror = () => reject(new Error('网络错误'));
-                    xhr.ontimeout = () => reject(new Error('上传超时'));
+                    xhr.onerror = () => reject(new Error(l10n.network_error));
+                    xhr.ontimeout = () => reject(new Error(l10n.upload_timeout));
                     xhr.send(formData);
                 });
             }
-            
+
             async function uploadChunkWithBackoff(formData, start, end) {
                 let delay = 1000;
                 for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -1042,12 +1115,12 @@ class WP_Backup_Restore_Active {
                     } catch (error) {
                         if (attempt === maxRetries) throw error;
                         const wait = delay * Math.pow(2, attempt - 1);
-                        $('#upload-status').html(`<span style="color:#d63638;">区间 ${start}-${end} 上传失败，${wait/1000}秒后重试 (${attempt}/${maxRetries})...</span>`);
+                        $('#upload-status').html(`<span style="color:#d63638;">${l10n.chunk_upload_failed} ${start}-${end}, retry in ${wait/1000}s (${attempt}/${maxRetries})...</span>`);
                         await sleep(wait);
                     }
                 }
             }
-            
+
             function mergeIntervals(intervals) {
                 if (intervals.length === 0) return [];
                 intervals.sort((a, b) => a.start - b.start);
@@ -1063,7 +1136,7 @@ class WP_Backup_Restore_Active {
                 }
                 return merged;
             }
-            
+
             function getRemainingIntervals(fileSize, uploaded) {
                 let merged = mergeIntervals(uploaded);
                 let remaining = [];
@@ -1079,7 +1152,7 @@ class WP_Backup_Restore_Active {
                 }
                 return remaining;
             }
-            
+
             async function getUploadedParts(filename, fileSize) {
                 return new Promise((resolve, reject) => {
                     $.post(ajaxUrl, {
@@ -1090,10 +1163,10 @@ class WP_Backup_Restore_Active {
                     }, function(res) {
                         if (res.success) resolve(res.data.parts || []);
                         else reject(new Error(res.data));
-                    }, 'json').fail(() => reject(new Error('查询状态失败')));
+                    }, 'json').fail(() => reject(new Error(l10n.upload_status_failed)));
                 });
             }
-            
+
             async function cancelUpload(filename, fileSize) {
                 return new Promise((resolve, reject) => {
                     $.post(ajaxUrl, {
@@ -1104,10 +1177,10 @@ class WP_Backup_Restore_Active {
                     }, function(res) {
                         if (res.success) resolve();
                         else reject(new Error(res.data));
-                    }, 'json').fail(() => reject(new Error('中断请求失败')));
+                    }, 'json').fail(() => reject(new Error(l10n.upload_cancel_failed)));
                 });
             }
-            
+
             async function uploadFileInChunks(file) {
                 currentFile = file;
                 isUploading = true;
@@ -1119,11 +1192,11 @@ class WP_Backup_Restore_Active {
                     const totalBytes = file.size;
                     let uploadedBytes = uploadedParts.reduce((sum, p) => sum + (p.end - p.start), 0);
                     let initialPercent = Math.round((uploadedBytes / totalBytes) * 100);
-                    
+
                     $('#upload-progress-container').show();
                     $('#upload-progress-bar').css('width', initialPercent + '%').text(initialPercent + '%');
-                    $('#upload-status').html(`准备上传，动态分片大小 ${(currentChunkSize/1024/1024).toFixed(1)}MB，剩余 ${remainingIntervals.length} 个区间`);
-                    
+                    $('#upload-status').html(l10n.preparing_upload + (currentChunkSize/1024/1024).toFixed(1) + 'MB, ' + remainingIntervals.length + ' ' + l10n.remaining_intervals);
+
                     for (let interval of remainingIntervals) {
                         if (!isUploading) break;
                         let start = interval.start;
@@ -1140,95 +1213,93 @@ class WP_Backup_Restore_Active {
                             formData.append('_wpnonce', nonce);
                             try {
                                 const response = await uploadChunkWithBackoff(formData, start, chunkEnd);
-                                if (response && response.message === '上传并合并完成') {
+                                // 判断是否完成合并
+                                if (response && response.data && response.data.status === 'success') {
                                     isUploading = false;
-                                    $('#upload-status').html('<span style="color:#46b450;">✓ 上传成功，正在刷新页面...</span>');
-                                    setTimeout(() => location.reload(), 1500);
+                                    $('#upload-progress-bar').css('width', '100%').text('100%');
+                                    $('#upload-status').html('<span style="color:green;">' + l10n.upload_success + '</span>');
+                                    setTimeout(() => location.reload(), 1000);
                                     return;
                                 }
+                                // 未完成，更新进度
                                 uploadedParts.push({ start: start, end: chunkEnd });
                                 uploadedParts = mergeIntervals(uploadedParts);
                                 const uploadedNow = uploadedParts.reduce((sum, p) => sum + (p.end - p.start), 0);
                                 const percent = Math.round((uploadedNow / totalBytes) * 100);
                                 $('#upload-progress-bar').css('width', percent + '%').text(percent + '%');
-                                $('#upload-status').text(`区间 ${start}-${chunkEnd} 上传成功 (${percent}%)`);
+                                $('#upload-status').text(l10n.chunk_upload_success + start + '-' + chunkEnd + ') ' + percent + '%');
                                 start = chunkEnd;
                             } catch (error) {
-                                throw new Error(`上传失败: ${error.message}`);
+                                throw new Error(l10n.upload_failed + error.message);
                             }
                         }
                     }
-                    
-                    if (isUploading) {
-                        const finalParts = await getUploadedParts(file.name, file.size);
-                        if (finalParts.length === 0) {
-                            $('#upload-status').html('<span style="color:#46b450;">✓ 上传成功，正在刷新页面...</span>');
-                            setTimeout(() => location.reload(), 1500);
-                            return;
-                        }
-                        const finalMerged = mergeIntervals(finalParts);
-                        const totalCovered = finalMerged.reduce((sum, p) => sum + (p.end - p.start), 0);
-                        if (totalCovered >= file.size) {
-                            $('#upload-status').html('<span style="color:#46b450;">✓ 上传成功，正在刷新页面...</span>');
-                            setTimeout(() => location.reload(), 1500);
-                        } else {
-                            throw new Error('上传未完全完成');
-                        }
+
+                    // 所有分片处理完毕，最后检查一次状态（防止合并后未及时返回）
+                    const finalParts = await getUploadedParts(file.name, file.size);
+                    const finalMerged = mergeIntervals(finalParts);
+                    const totalCovered = finalMerged.reduce((sum, p) => sum + (p.end - p.start), 0);
+                    if (totalCovered >= file.size) {
+                        $('#upload-progress-bar').css('width', '100%').text('100%');
+                        $('#upload-status').html('<span style="color:green;">' + l10n.upload_success + '</span>');
+                        setTimeout(() => location.reload(), 1000);
+                    } else {
+                        throw new Error(l10n.upload_incomplete);
                     }
                 } catch (error) {
-                    $('#upload-status').html(`<span style="color:#d63638;">✗ 上传失败：${error.message}</span>`);
+                    $('#upload-status').html(l10n.upload_failed + error.message);
                     setTimeout(() => $('#upload-progress-container').hide(), 3000);
                 } finally {
                     isUploading = false;
                     $('#btn-cancel-upload').hide();
                 }
             }
-            
+
             $('#btn-cancel-upload').click(async function() {
                 if (!currentFile || !isUploading) return;
-                if (confirm('确定要中断上传并清理已上传的临时文件吗？')) {
+                if (confirm(l10n.upload_cancel_confirm)) {
                     isUploading = false;
-                    $('#upload-status').html('正在中断并清理临时文件...');
+                    $('#upload-status').html(l10n.upload_cancelling);
                     try {
                         await cancelUpload(currentFile.name, currentFile.size);
-                        $('#upload-status').html('已中断上传，临时文件已清理');
+                        $('#upload-status').html(l10n.upload_cancelled);
                         setTimeout(() => $('#upload-progress-container').hide(), 2000);
                     } catch (error) {
-                        $('#upload-status').html(`中断失败：${error.message}`);
+                        $('#upload-status').html(l10n.upload_cancel_failed + error.message);
                     }
                     $('#btn-cancel-upload').hide();
                 }
             });
-            
+
             $('#btn-upload').click(function() { $('#upload-file-input').trigger('click'); });
             $('#upload-file-input').change(function() {
                 const file = this.files[0];
                 if (!file) return;
-                if (!file.name.endsWith('.bgbk')) { alert('只允许 .bgbk 格式的备份文件'); return; }
+                if (!file.name.endsWith('.bgbk')) { alert(l10n.only_bgbk_allowed); return; }
                 uploadFileInChunks(file);
             });
-            
+
             // ========== 备份/还原轮询逻辑（保持不变） ==========
             function resetConfirmButton() {
                 $('#confirm-btn').off('click').click(closeModal);
                 $('#cancel-modal-btn').off('click').click(closeModal);
             }
-			function showModal(title, showCancel = false) {
-				resetConfirmButton();
-				$('#modal-title').text(title);
-				$('#progress-bar').css('width', '0%').text('0%').show();   // 确保进度条可见
-				$('#progress-msg').text('准备中...');
-				$('#stop-btn').hide();
-				$('#confirm-btn').hide();
-				$('#cancel-modal-btn').hide();
-				if (showCancel) {
-					$('#cancel-modal-btn').show().text('取消');
-					$('#confirm-btn').show().text('确认');
-				} else {
-					$('#stop-btn').show().prop('disabled', false);
-				}
-				$('#modal-progress').show();
-			}
+            function showModal(title, showCancel = false) {
+                resetConfirmButton();
+                $('#modal-title').text(title);
+                $('#progress-bar').css('width', '0%').text('0%').show();
+                $('#progress-msg').text(l10n.preparing);
+                $('#stop-btn').hide();
+                $('#confirm-btn').hide();
+                $('#cancel-modal-btn').hide();
+                if (showCancel) {
+                    $('#cancel-modal-btn').show().text(l10n.modal_button_cancel);
+                    $('#confirm-btn').show().text(l10n.modal_button_confirm);
+                } else {
+                    $('#stop-btn').show().prop('disabled', false);
+                }
+                $('#modal-progress').show();
+            }
             function closeModal() {
                 $('#modal-progress').hide();
                 if (pollInterval) clearInterval(pollInterval);
@@ -1240,21 +1311,21 @@ class WP_Backup_Restore_Active {
             function stopTask() {
                 if (!currentTaskId || isStopping) return;
                 isStopping = true;
-                $('#stop-btn').prop('disabled', true).text('停止中...');
+                $('#stop-btn').prop('disabled', true).text(l10n.stopping);
                 $.post(apiUrl, { api_type: 'stop_task', task_id: currentTaskId }, function(res) {
                     if (res.success) {
-                        $('#progress-msg').html('<span style="color:#d63638;">⏸️ 正在停止任务并清理临时文件...</span>');
+                        $('#progress-msg').html(l10n.stopping_task);
                         if (pollInterval) clearInterval(pollInterval);
                         setTimeout(function() {
                             $.get(apiUrl, { api_type: currentType + '_status', task_id: currentTaskId }, function(res) {
                                 var d = res.data;
                                 if (d.status === 'error' || d.status === 'stopped') {
-                                    $('#progress-msg').html('任务已停止，临时文件已清理。');
+                                    $('#progress-msg').html(l10n.task_stopped);
                                     $('#stop-btn').hide();
                                     $('#confirm-btn').show();
                                     resetConfirmButton();
                                 } else {
-                                    $('#progress-msg').html('任务可能仍在停止中，请稍后手动刷新页面。');
+                                    $('#progress-msg').html(l10n.task_maybe_stopping);
                                     $('#stop-btn').hide();
                                     $('#confirm-btn').show();
                                     resetConfirmButton();
@@ -1262,8 +1333,8 @@ class WP_Backup_Restore_Active {
                             });
                         }, 2000);
                     } else {
-                        $('#progress-msg').html('<span style="color:#d63638;">停止请求失败：' + (res.message || '未知错误') + '</span>');
-                        $('#stop-btn').prop('disabled', false).text('停止任务');
+                        $('#progress-msg').html(l10n.stop_failed + (res.message || l10n.unknown_error));
+                        $('#stop-btn').prop('disabled', false).text(l10n.modal_button_stop);
                         isStopping = false;
                     }
                 }, 'json');
@@ -1276,28 +1347,28 @@ class WP_Backup_Restore_Active {
                         var d = res.data;
                         var percent = d.percent || 0;
                         $('#progress-bar').css('width', percent + '%').text(percent + '%');
-                        $('#progress-msg').html(d.message || '处理中...');
+                        $('#progress-msg').html(d.message || l10n.processing);
                         if (d.status === 'done' || percent >= 100) {
                             clearInterval(pollInterval);
                             $('#progress-bar').css('background', '#46b450').text('100%');
-                            var msgHtml = (type === 'backup') ? 
-                                '<div style="margin-top:10px; padding:10px; background:#f0fff0; border:1px solid #46b450; border-radius:4px;"><b style="color:#46b450;">✔ 备份圆满完成！</b><br><span style="color:#666;">全站文件与数据库已成功备份。</span></div>' :
-                                '<div style="margin-top:10px; padding:10px; background:#f0fff0; border:1px solid #46b450; border-radius:4px;"><b style="color:#46b450;">✔ 还原圆满完成！</b><br><span style="color:#666;">全站数据已成功还原。</span><br><span style="color:#d63638;">提示：由于数据库已更新，请手动刷新页面，可能需要重新登录。</span></div>';
+                            var msgHtml = (type === 'backup') ?
+                                '<div style="margin-top:10px; padding:10px; background:#f0fff0; border:1px solid #46b450; border-radius:4px;"><b style="color:#46b450;">' + l10n.backup_complete + '</b><br><span style="color:#666;">' + l10n.backup_complete_msg + '</span></div>' :
+                                '<div style="margin-top:10px; padding:10px; background:#f0fff0; border:1px solid #46b450; border-radius:4px;"><b style="color:#46b450;">' + l10n.restore_complete + '</b><br><span style="color:#666;">' + l10n.restore_complete_msg + '</span></div>';
                             $('#progress-msg').html(msgHtml);
                             $('#stop-btn').hide();
-                            $('#confirm-btn').show().text('确定并刷新页面').off('click').on('click', function() {
-                                location.href = window.location.origin + '/wp-admin/tools.php?page=wp-backup-restore';
+                            $('#confirm-btn').show().text(l10n.modal_button_confirm_refresh).off('click').on('click', function() {
+                                location.href = window.location.origin + '/wp-admin/tools.php?page=WP-Res';
                             });
                         } else if (d.status === 'error') {
                             clearInterval(pollInterval);
-                            $('#progress-msg').html('<span style="color:#d63638;">❌ 错误：' + (d.message || '未知错误') + '</span>');
+                            $('#progress-msg').html(l10n.error_occurred + (d.message || l10n.unknown_error));
                             $('#stop-btn').hide();
-                            $('#confirm-btn').show().text('确定').off('click').click(closeModal);
+                            $('#confirm-btn').show().text(l10n.modal_button_confirm).off('click').click(closeModal);
                         } else if (d.status === 'stopped') {
                             clearInterval(pollInterval);
-                            $('#progress-msg').html('任务已手动停止，临时文件已清理。');
+                            $('#progress-msg').html(l10n.task_stopped);
                             $('#stop-btn').hide();
-                            $('#confirm-btn').show().text('确定').off('click').click(closeModal);
+                            $('#confirm-btn').show().text(l10n.modal_button_confirm).off('click').click(closeModal);
                         }
                     });
                 }, 2000);
@@ -1310,31 +1381,31 @@ class WP_Backup_Restore_Active {
                         currentType = (apiType === 'backup_start' ? 'backup' : 'restore');
                         pollStatus(currentTaskId, currentType);
                     } else {
-                        $('#progress-msg').html('启动失败：' + (res.message || '未知错误'));
+                        $('#progress-msg').html(l10n.start_failed + (res.message || l10n.unknown_error));
                         $('#stop-btn').hide();
                         $('#confirm-btn').show();
                         resetConfirmButton();
                     }
                 }, 'json');
             }
-            
+
             $('#stop-btn').click(stopTask);
             $('#confirm-btn').click(closeModal);
             $('#cancel-modal-btn').click(closeModal);
-            
+
             $('#log-level').change(function() {
                 var level = $(this).val();
                 $.post(ajaxUrl, { action: 'save_log_level', level: level }, function(res) {
                     if (res.success) {
-                        $('#log-save-status').text('已保存').fadeOut(1500, function() { $(this).text('').show(); });
+                        $('#log-save-status').text(l10n.log_level_saved).fadeOut(1500, function() { $(this).text('').show(); });
                     } else {
-                        $('#log-save-status').text('保存失败').css('color','red').fadeOut(1500, function() { $(this).text('').css('color','#00a32a').show(); });
+                        $('#log-save-status').text(l10n.log_level_save_failed).css('color','red').fadeOut(1500, function() { $(this).text('').css('color','#00a32a').show(); });
                     }
                 });
             });
             $('#copy-log-path').click(function() {
                 var text = $('.log-area code').text();
-                navigator.clipboard.writeText(text).then(function() { alert('路径已复制'); });
+                navigator.clipboard.writeText(text).then(function() { alert(l10n.copy_path_success); });
             });
         });
         </script>
