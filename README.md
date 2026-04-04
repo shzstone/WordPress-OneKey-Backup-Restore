@@ -1,116 +1,112 @@
-# WP One-Click Backup & Restore | WP 一键备份还原
+# 🔄 WP One-Click Backup & Restore (WP-Res)
 
-<p align="center">
-  <a href="#english">English</a> | <a href="#简体中文">简体中文</a>
-</p>
+<div align="center">
+
+**WordPress 迁移、备份与修复的“全能瑞士军刀”**
+
+[![WordPress Version](https://img.shields.io/badge/WordPress-5.0+-21759b.svg)](https://wordpress.org/)
+[![PHP Version](https://img.shields.io/badge/PHP-7.0+-777bb4.svg)](https://php.net/)
+[![License](https://img.shields.io/badge/license-GPL--2.0-orange.svg)](LICENSE)
+
+[**English Version**](#-english) | [**简体中文**](#-简体中文)
 
 ---
+</div>
 
-<a name="english"></a>
+<a name="-english"></a>
+## 🌍 English
 
-## 🌐 English
-
-**WP One-Click Backup & Restore** is a high-performance WordPress plugin designed for seamless site migration and data security. It handles large files through dynamic chunking and ensures database integrity with serialization-aware replacement.
+### 🚀 Why choose WP-Res?
+Most WordPress migration tools struggle with large databases or complex **serialized data** (like Elementor or Slider Revolution settings). Changing a domain often breaks these configurations. **WP-Res** is built with a "Migration First" philosophy—ensuring your site looks and works exactly the same on a new server, while providing industrial-grade upload stability.
 
 ### ✨ Key Features
+*   **📦 One-Click Full Snapshot:** Encapsulate all files and the database into a secure `.bgbk` archive.
+*   **🛡️ Recursive Domain Replacement:** Deep-scans serialized arrays and objects. No more broken layouts or missing images after changing URLs.
+*   **⚡ Pro-Grade Chunked Upload:**
+    *   **Dynamic Sizing:** Automatically adjusts chunk size based on network speed.
+    *   **Breakpoint Resuming:** Pick up exactly where you left off if the connection drops.
+    *   **Exponential Backoff:** Smart retry logic for unstable server environments.
+*   **🛠️ Exclusive: Hash Residue Fixer:** Repair `{hash}` placeholders (e.g., `{ccea3...}`) left behind by other failed migration plugins. Includes a **Smart Mode** to restore paired-hash content.
+*   **🔑 Session Preservation:** Automatically keeps your admin session active after a restore—no more annoying logouts.
 
-- **🚀 Dynamic Chunked Uploads**: 
-  - Auto-adjust chunk size (2MB-10MB) based on network.
-  - Breakpoint resumable uploads (no need to restart on failure).
-  - Exponential backoff retry for high stability.
-- **🛡️ Serialization-Safe Replacement**: 
-  - Automatically handles serialized data during domain 
-    migration to prevent theme/plugin settings corruption.
-- **💾 Streaming DB Engine**: 
-  - Exports and imports databases using streaming to bypass 
-    PHP memory limits and execution timeouts.
-- **🔍 Intelligent Pre-checks**: 
-  - Real-time disk space estimation.
-  - ZIP64 compatibility alerts for files exceeding 4GB.
-- **🔑 Session Persistence**: 
-  - Keeps you logged in after restoration by preserving 
-    active session tokens.
+### 🛠 Technical Highlights
+*   **Streaming DB Engine:** Uses stream I/O to handle massive SQL files without hitting PHP `memory_limit`.
+*   **Disk Intelligence:** Pre-checks available space and ZIP64 compatibility (for files >4GB) before starting.
+*   **Atomic Table Swap:** Uses temporary table prefixing and RENAME logic to ensure zero-downtime database updates.
 
-### 🛠️ Requirements
-
-- **PHP**: 7.0+ (7.4+ recommended).
-- **WordPress**: 5.0+.
-- **Extension**: `ZipArchive` (libzip 1.6.0+ for 4GB+ files).
-
-### 🚀 Quick Start
-
-1. Download and upload to `/wp-content/plugins/`.
-2. Activate via WordPress dashboard.
-3. Go to **Tools > WP Backup Restore**.
-4. **Backup**: Click "Backup Now".
-5. **Restore**: Select a `.bgbk` file and click "Full Restore".
+### 📖 How to Use
+1.  **Backup:** Go to `Tools -> WP Backup Restore`, click **Backup Now**.
+2.  **Transfer:** Download the file or use the **Upload** feature on the destination site.
+3.  **Restore:** Select the backup and click **Full Site Restore**. The plugin handles domain mapping and session syncing automatically.
 
 ---
 
-<a name="简体中文"></a>
+<a name="-简体中文"></a>
+## 🏮 简体中文
 
-## 🇨🇳 简体中文
+### 🚀 为什么选择 WP-Res？
+市面上大多数 WordPress 迁移工具在处理超大数据库或复杂的**序列化数据**（如 Elementor、高级幻灯片插件配置）时经常会失效。更换域名后，这些配置往往会损坏。**WP-Res** 专为“深度迁移”而生——它不仅保证站点在目标服务器上完美还原，还提供了工业级的上传稳定性。
 
-**WP一键备份还原** 是一款高性能 WordPress 插件，专为网站迁移和数据安全而生。它支持动态分片技术处理大文件，并通过兼容序列化的域名替换技术确保数据的绝对安全。
+### ✨ 核心亮点
+*   **📦 全量快照：** 一键将全站文件与数据库封装为加密的 `.bgbk` 存档，简单可靠。
+*   **🛡️ 递归式域名替换：** 深度扫描数据库中的序列化数组与对象。彻底告别换域名后布局错乱或图片丢失的烦恼。
+*   **⚡ 工业级分片上传：**
+    *   **动态分片：** 根据网络环境自动调整分片大小。
+    *   **断点续传：** 上传中断无需从头开始，从断点处继续。
+    *   **指数退避：** 智能重试机制，从容应对不稳定的服务器环境。
+*   **🛠️ 独家：哈希残留修复工具：** 专门清理其他迁移插件失败后留下的 `{hash}` 占位符（如 `{ccea3...}`），支持**智能模式**自动还原内容。
+*   **🔑 Session 保持技术：** 还原后自动同步登录状态，无需重新登录。
 
-### ✨ 核心特性
+### 🛠 技术特色
+*   **流式数据库引擎：** 采用流式 I/O 处理，支持超大数据库，不受 PHP `memory_limit` 限制。
+*   **磁盘智能预检：** 启动前自动计算所需空间，并检测环境对 4GB 以上大文件的 (ZIP64) 兼容性。
+*   **原子化表交换：** 采用临时表导入机制，确保在数据完全就绪前不影响原站运行。
 
-- **🚀 动态分片上传**:
-  - 根据网络环境自动调整分片（2MB - 10MB）。
-  - 支持断点续传，无需因网络波动从头开始。
-  - 内置指数退避重试机制，极高提高成功率。
-- **🛡️ 序列化安全替换**:
-  - 还原时自动处理数据库中的序列化字符串，
-    防止主题和插件配置在更换域名后失效。
-- **💾 流式数据库引擎**:
-  - 采用流式导出/导入技术，彻底告别 
-    PHP 内存溢出和执行超时问题。
-- **🔍 智能预检查**:
-  - 备份/还原前自动估算所需磁盘空间。
-  - 针对 4GB 以上大文件提供 ZIP64 风险提示。
-- **🔑 登录状态保持**:
-  - 还原后自动迁移 Session，无需重新登录即可继续操作。
+### 📖 使用说明
+1.  **备份：** 进入 `工具 -> WP Backup Restore`，点击 **立即备份**。
+2.  **传输：** 下载生成的备份文件，或在目标站使用 **上传备份** 功能。
+3.  **还原：** 选择备份文件并点击 **全量还原站点**，程序会自动处理域名映射、序列化修复及登录态同步。
 
-### 🛠️ 技术要求
+---
 
-- **PHP 版本**: 7.0 及以上 (推荐 7.4+)。
-- **WordPress 版本**: 5.0 及以上。
-- **必要扩展**: `ZipArchive` (处理 4GB+ 文件建议 libzip 1.6.0+)。
-
-### 🚀 快速上手
-
-1. 下载本插件并上传至 `/wp-content/plugins/`。
-2. 在 WordPress 后台启用插件。
-3. 进入 **工具 > WP一键备份还原**。
-4. **备份**: 点击“立即备份”。
-5. **还原**: 选择或上传 `.bgbk` 文件，点击“全站一键还原”。
+### ⚙️ Requirements / 系统要求
+- PHP 7.0+ (7.4+ recommended)
+- WordPress 5.0+
+- PHP `ZipArchive` extension enabled.
 
 ---
 
 <div style="text-align: left;">
-  <img src="https://github.com/user-attachments/assets/dd821a5f-9959-4247-89eb-6f6f25bf98d1" alt="WP 一键备份还原" width="100%">
+  <img src="https://github.com/user-attachments/assets/b668251d-6c10-486e-8472-d8e266e5ff47" alt="WP 一键备份还原" width="100%">
 </div>
 
 ---
 
 <div style="text-align: left;">
-  <img src="https://github.com/user-attachments/assets/01ab90d6-c6d5-4e91-85e1-dbff0eaabe71" alt="磁盘检查" width="40%">
-</div>
-<div style="text-align: left;">
-  <img src="https://github.com/user-attachments/assets/d81d961f-deac-4361-a88c-ad906bbc55d2" alt="备份全站" width="40%">
+  <img src="https://github.com/user-attachments/assets/ba70b0c9-6180-49c3-ab6e-198590ddef5c" alt="WP 哈希修复" width="100%">
 </div>
 
 ---
 
 <div style="text-align: left;">
-  <img src="https://github.com/user-attachments/assets/e2636924-9440-4df3-80ab-2b6eeb2beee3" alt="还原全站" width="40%">
+  <img src="https://github.com/user-attachments/assets/442b6779-2011-4d59-a2f2-02f7b91a97d7" alt="磁盘检查" width="40%">
+</div>
+<div style="text-align: left;">
+  <img src="https://github.com/user-attachments/assets/455a7bef-8524-4674-951a-11741d79c852" alt="备份全站" width="40%">
 </div>
 
 ---
 
+<div style="text-align: left;">
+  <img src="https://github.com/user-attachments/assets/01e6c85e-f5b6-41b3-a671-6662b587d501" alt="还原全站" width="40%">
+</div>
 
-### 📄 License
+---
 
-Author: [Stone](https://blog.cacca.cc)  
-This project is licensed under the GPLv2 or later.
+### 📄 License & Author
+- **Author:** [Stone](https://blog.cacca.cc)
+- **Project:** [WordPress-OneKey-Backup-Restore](https://github.com/shzstone/WordPress-OneKey-Backup-Restore)
+- **License:** GPL-2.0
 
+> **Notice:** Always perform a manual database backup before any major migration.
+> **注意：** 在执行重大迁移操作前，请务必养成手动备份数据库的良好习惯。

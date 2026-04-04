@@ -1,570 +1,684 @@
+# WP-Res (WP一键备份还原) 翻译模板
+# Copyright (C) 2025 Stone
+# This file is distributed under the same license as the WP-Res plugin.
 msgid ""
 msgstr ""
-"Project-Id-Version: WP一键备份还原 1.0.3\n"
+"Project-Id-Version: WP-Res 1.2.0\n"
 "Report-Msgid-Bugs-To: https://blog.cacca.cc\n"
-"POT-Creation-Date: 2026-04-03 10:00+0800\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
-"Language: \n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"X-Generator: WP-Translations\n"
+"POT-Creation-Date: 2025-01-01 00:00+0000\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: WP-CLI 2.0\n"
 
-#: WP-Res.php:95 WP-Res.php:96 WP-Res.php:97
+#: WP-Res.php
 msgid "Log file exceeded 512KB, cleared"
 msgstr ""
 
-#: WP-Res.php:114 WP-Res.php:363
-msgid "Permission denied"
-msgstr ""
-
-#: WP-Res.php:119
+#: WP-Res.php
 msgid "Log level changed to: %s"
 msgstr ""
 
-#: WP-Res.php:122
-msgid "Invalid level"
+#: WP-Res.php
+msgid "Permission denied"
 msgstr ""
 
-#: WP-Res.php:165
-msgid "Cleaned up residual files from previous tasks"
-msgstr ""
-
-#: WP-Res.php:208 WP-Res.php:209 WP-Res.php:210 WP-Res.php:211
-msgid "Your PHP version is %s, which has incomplete support for ZIP64 (files >4GB). Backup/restore may fail. Upgrade to PHP 7.0+ recommended."
-msgstr ""
-
-#: WP-Res.php:212 WP-Res.php:213 WP-Res.php:214
-msgid "Your libzip extension version is %s, which does not fully support ZIP64. Handling large files may fail. Upgrade libzip to 1.6.0 or later."
-msgstr ""
-
-#: WP-Res.php:215 WP-Res.php:216 WP-Res.php:217
-msgid "Backup file exceeds 4GB. Your environment supports ZIP64, so it can be handled normally."
-msgstr ""
-
-#: WP-Res.php:228
+#: WP-Res.php
 msgid "Invalid request"
 msgstr ""
 
-#: WP-Res.php:235
+#: WP-Res.php
+msgid "Invalid level"
+msgstr ""
+
+#: WP-Res.php
 msgid "Unable to get disk space information"
 msgstr ""
 
-#: WP-Res.php:246
+#: WP-Res.php
 msgid "Current site total size approximately %s. Backup process requires at least %s of free space."
 msgstr ""
 
-#: WP-Res.php:250
-msgid "Backup file does not exist"
-msgstr ""
-
-#: WP-Res.php:253
+#: WP-Res.php
 msgid "Extracted content estimated to occupy %s. Restore process requires at least %s of free space."
 msgstr ""
 
-#: WP-Res.php:256
+#: WP-Res.php
 msgid "Invalid check type"
 msgstr ""
 
-#: WP-Res.php:282
-msgid "Scanning site files..."
+#: WP-Res.php
+msgid "Your PHP version is %s, which has incomplete support for ZIP64 (files >4GB). Backup/restore may fail. Upgrade to PHP 7.0+ recommended."
 msgstr ""
 
-#: WP-Res.php:287
+#: WP-Res.php
+msgid "Your libzip extension version is %s, which does not fully support ZIP64. Handling large files may fail. Upgrade libzip to 1.6.0 or later."
+msgstr ""
+
+#: WP-Res.php
+msgid "Backup file exceeds 4GB. Your environment supports ZIP64, so it can be handled normally."
+msgstr ""
+
+#: WP-Res.php
 msgid "Unable to create archive"
 msgstr ""
 
-#: WP-Res.php:289
+#: WP-Res.php
 msgid "Task stopped by user"
 msgstr ""
 
-#: WP-Res.php:293
+#: WP-Res.php
 msgid "Packing files: %d/%d"
 msgstr ""
 
-#: WP-Res.php:298
+#: WP-Res.php
 msgid "Exporting database..."
 msgstr ""
 
-#: WP-Res.php:309
+#: WP-Res.php
 msgid "Backup completed successfully!"
 msgstr ""
 
-#: WP-Res.php:324
-msgid "=== Restore started ==="
-msgstr ""
-
-#: WP-Res.php:325
-msgid "Task ID: %s"
-msgstr ""
-
-#: WP-Res.php:326
-msgid "Backup file: %s"
-msgstr ""
-
-#: WP-Res.php:327
-msgid "Current target domain: %s"
-msgstr ""
-
-#: WP-Res.php:331
-msgid "Extracting site files..."
-msgstr ""
-
-#: WP-Res.php:335
-msgid "Start extracting, total %d files"
-msgstr ""
-
-#: WP-Res.php:337
+#: WP-Res.php
 msgid "Task stopped"
 msgstr ""
 
-#: WP-Res.php:342
-msgid "Extracting files: %d/%d"
-msgstr ""
-
-#: WP-Res.php:347
-msgid "Extraction completed"
-msgstr ""
-
-#: WP-Res.php:349
+#: WP-Res.php
 msgid "Cannot open backup file"
 msgstr ""
 
-#: WP-Res.php:355
+#: WP-Res.php
 msgid "Preparing bulk database import..."
 msgstr ""
 
-#: WP-Res.php:358
+#: WP-Res.php
 msgid "Atomically replacing table structure..."
 msgstr ""
 
-#: WP-Res.php:362
-msgid "Database import and swap completed"
-msgstr ""
-
-#: WP-Res.php:370
+#: WP-Res.php
 msgid "Performing safe domain replacement: %s -> %s"
 msgstr ""
 
-#: WP-Res.php:377
+#: WP-Res.php
 msgid "Restoring login session..."
 msgstr ""
 
-#: WP-Res.php:382
+#: WP-Res.php
 msgid "Full site restore successful!"
 msgstr ""
 
-#: WP-Res.php:384
-msgid "Restore process completed"
-msgstr ""
-
-#: WP-Res.php:386
+#: WP-Res.php
 msgid "Exception: "
 msgstr ""
 
-#: WP-Res.php:398
-msgid "Exporting table: %s"
-msgstr ""
-
-#: WP-Res.php:413
+#: WP-Res.php
 msgid "Stopped"
 msgstr ""
 
-#: WP-Res.php:435
-msgid "Total SQL statements: %d"
+#: WP-Res.php
+msgid "Backup file does not exist"
 msgstr ""
 
-#: WP-Res.php:465
+#: WP-Res.php
+msgid "Extracting site files..."
+msgstr ""
+
+#: WP-Res.php
+msgid "Start extracting, total %d files"
+msgstr ""
+
+#: WP-Res.php
+msgid "Extracting files: %d/%d"
+msgstr ""
+
+#: WP-Res.php
+msgid "Extraction completed"
+msgstr ""
+
+#: WP-Res.php
 msgid "Database restore progress: %d / %d SQL statements"
 msgstr ""
 
-#: WP-Res.php:476
+#: WP-Res.php
+msgid "Database import and swap completed"
+msgstr ""
+
+#: WP-Res.php
 msgid "Starting replace_domain_safe: %s -> %s"
 msgstr ""
 
-#: WP-Res.php:480
+#: WP-Res.php
 msgid "Updated siteurl/home, rows affected: %s"
 msgstr ""
 
-#: WP-Res.php:484
+#: WP-Res.php
 msgid "Updated post_content, rows affected: %s"
 msgstr ""
 
-#: WP-Res.php:488
+#: WP-Res.php
 msgid "Updated guid, rows affected: %s"
 msgstr ""
 
-#: WP-Res.php:494
-msgid "Updated postmeta, rows affected: %s"
-msgstr ""
-
-#: WP-Res.php:496
+#: WP-Res.php
 msgid "COMMIT executed"
 msgstr ""
 
-#: WP-Res.php:498
+#: WP-Res.php
 msgid "replace_domain_safe completed"
 msgstr ""
 
-#: WP-Res.php:540
-msgid "Session restored successfully, user: %s"
-msgstr ""
-
-#: WP-Res.php:560
+#: WP-Res.php
 msgid "Swapping temporary tables, total %d tables"
 msgstr ""
 
-#: WP-Res.php:566
+#: WP-Res.php
 msgid "Table swap completed"
 msgstr ""
 
-#: WP-Res.php:608
-msgid "Invalid file"
+#: WP-Res.php
+msgid "Cleaned up residual files from previous tasks"
 msgstr ""
 
-#: WP-Res.php:609 WP-Res.php:619 WP-Res.php:625 WP-Res.php:640 WP-Res.php:651
-#: WP-Res.php:663 WP-Res.php:681
+#: WP-Res.php
+msgid "Session restored successfully, user: %s"
+msgstr ""
+
+#: WP-Res.php
+msgid "Task ID: %s"
+msgstr ""
+
+#: WP-Res.php
+msgid "Backup file: %s"
+msgstr ""
+
+#: WP-Res.php
+msgid "Current target domain: %s"
+msgstr ""
+
+#: WP-Res.php
+msgid "=== Restore started ==="
+msgstr ""
+
+#: WP-Res.php
+msgid "Total SQL statements: %d"
+msgstr ""
+
+#: WP-Res.php
 msgid "Missing file parameter"
 msgstr ""
 
-#: WP-Res.php:622
-msgid "Deleted"
+#: WP-Res.php
+msgid "Invalid file"
 msgstr ""
 
-#: WP-Res.php:623
+#: WP-Res.php
 msgid "Deletion failed"
 msgstr ""
 
-#: WP-Res.php:637
+#: WP-Res.php
+msgid "Deleted"
+msgstr ""
+
+#: WP-Res.php
 msgid "Invalid parameters"
 msgstr ""
 
-#: WP-Res.php:642
+#: WP-Res.php
 msgid "Chunk upload error"
 msgstr ""
 
-#: WP-Res.php:652
+#: WP-Res.php
 msgid "Failed to save chunk"
 msgstr ""
 
-#: WP-Res.php:676
+#: WP-Res.php
 msgid "Cannot create final file, please check directory permissions"
 msgstr ""
 
-#: WP-Res.php:684
+#: WP-Res.php
 msgid "Chunk file missing, merge failed"
 msgstr ""
 
-#: WP-Res.php:695
+#: WP-Res.php
 msgid "Upload and merge completed"
 msgstr ""
 
-#: WP-Res.php:697
+#: WP-Res.php
 msgid "Chunk received"
 msgstr ""
 
-#: WP-Res.php:725
+#: WP-Res.php
 msgid "Upload cancelled and temporary files cleaned"
 msgstr ""
 
-#: WP-Res.php:756
+#: WP-Res.php
 msgid "Please select a backup file"
 msgstr ""
 
-#: WP-Res.php:757
+#: WP-Res.php
 msgid "Are you sure you want to delete this backup file? This cannot be undone!"
 msgstr ""
 
-#: WP-Res.php:758
+#: WP-Res.php
 msgid "Only .bgbk backup files are allowed."
 msgstr ""
 
-#: WP-Res.php:759
+#: WP-Res.php
 msgid "Are you sure you want to cancel the upload and clean up temporary files?"
 msgstr ""
 
-#: WP-Res.php:760
+#: WP-Res.php
 msgid "Confirm Restore"
 msgstr ""
 
-#: WP-Res.php:761
+#: WP-Res.php
 msgid "Disk Space Check"
 msgstr ""
 
-#: WP-Res.php:762
+#: WP-Res.php
 msgid "Calculating disk space, please wait...<br><span style=\"font-size:12px;\">(May take a few seconds if the site has many files)</span>"
 msgstr ""
 
-#: WP-Res.php:763
+#: WP-Res.php
 msgid "Full Site Backup in Progress"
 msgstr ""
 
-#: WP-Res.php:764
+#: WP-Res.php
 msgid "Full Site Restore in Progress"
 msgstr ""
 
-#: WP-Res.php:765
+#: WP-Res.php
 msgid "✔ Backup completed successfully!"
 msgstr ""
 
-#: WP-Res.php:766
+#: WP-Res.php
 msgid "✔ Restore completed successfully!"
 msgstr ""
 
-#: WP-Res.php:767
+#: WP-Res.php
 msgid "All site files and database have been backed up."
 msgstr ""
 
-#: WP-Res.php:768
+#: WP-Res.php
 msgid "All site data has been restored.<br><span style=\"color:#d63638;\">Note: The database has been updated. Please refresh the page; you may need to log in again.</span>"
 msgstr ""
 
-#: WP-Res.php:769
+#: WP-Res.php
 msgid "❌ Error: "
 msgstr ""
 
-#: WP-Res.php:770
+#: WP-Res.php
 msgid "Task stopped manually, temporary files cleaned."
 msgstr ""
 
-#: WP-Res.php:771
+#: WP-Res.php
 msgid "⏸️ Stopping task and cleaning temporary files..."
 msgstr ""
 
-#: WP-Res.php:772
+#: WP-Res.php
 msgid "Task may still be stopping, please refresh manually later."
 msgstr ""
 
-#: WP-Res.php:773
+#: WP-Res.php
 msgid "Stop request failed: "
 msgstr ""
 
-#: WP-Res.php:774
+#: WP-Res.php
 msgid "Network error, please check connection"
 msgstr ""
 
-#: WP-Res.php:775
+#: WP-Res.php
 msgid "Unknown error"
 msgstr ""
 
-#: WP-Res.php:776
+#: WP-Res.php
 msgid "Check failed: "
 msgstr ""
 
-#: WP-Res.php:777
+#: WP-Res.php
 msgid "Request failed, please check network connection"
 msgstr ""
 
-#: WP-Res.php:778
+#: WP-Res.php
 msgid "Deleted successfully"
 msgstr ""
 
-#: WP-Res.php:779
+#: WP-Res.php
 msgid "Deletion failed: "
 msgstr ""
 
-#: WP-Res.php:780
+#: WP-Res.php
 msgid "✓ Upload successful, refreshing page..."
 msgstr ""
 
-#: WP-Res.php:781
+#: WP-Res.php
 msgid "✗ Upload failed: "
 msgstr ""
 
-#: WP-Res.php:782
+#: WP-Res.php
 msgid "Upload cancelled, temporary files cleaned"
 msgstr ""
 
-#: WP-Res.php:783
+#: WP-Res.php
 msgid "Cancel failed: "
 msgstr ""
 
-#: WP-Res.php:784
+#: WP-Res.php
 msgid "Preparing upload, dynamic chunk size "
 msgstr ""
 
-#: WP-Res.php:785
+#: WP-Res.php
 msgid "remaining intervals"
 msgstr ""
 
-#: WP-Res.php:786
+#: WP-Res.php
 msgid "Chunk upload successful ("
 msgstr ""
 
-#: WP-Res.php:787
+#: WP-Res.php
 msgid "Chunk upload failed, retrying ("
 msgstr ""
 
-#: WP-Res.php:788
+#: WP-Res.php
 msgid "attempt"
 msgstr ""
 
-#: WP-Res.php:789
+#: WP-Res.php
 msgid "Network good, chunk size increased to "
 msgstr ""
 
-#: WP-Res.php:790
+#: WP-Res.php
 msgid "Chunk too large, reduced to "
 msgstr ""
 
-#: WP-Res.php:791
+#: WP-Res.php
 msgid "Path copied"
 msgstr ""
 
-#: WP-Res.php:792
+#: WP-Res.php
 msgid "Saved"
 msgstr ""
 
-#: WP-Res.php:793
+#: WP-Res.php
 msgid "Save failed"
 msgstr ""
 
-#: WP-Res.php:794
+#: WP-Res.php
 msgid "Backup Now"
 msgstr ""
 
-#: WP-Res.php:795
+#: WP-Res.php
 msgid "Download"
 msgstr ""
 
-#: WP-Res.php:796
+#: WP-Res.php
 msgid "Delete"
 msgstr ""
 
-#: WP-Res.php:797
+#: WP-Res.php
 msgid "Upload Backup"
 msgstr ""
 
-#: WP-Res.php:798
+#: WP-Res.php
 msgid "Cancel Upload"
 msgstr ""
 
-#: WP-Res.php:799
+#: WP-Res.php
 msgid "Full Site Restore"
 msgstr ""
 
-#: WP-Res.php:800
+#: WP-Res.php
 msgid "📋 Debug Log Level:"
 msgstr ""
 
-#: WP-Res.php:801
+#: WP-Res.php
 msgid "📁 Log file: "
 msgstr ""
 
-#: WP-Res.php:802
+#: WP-Res.php
 msgid "📋 Copy path"
 msgstr ""
 
-#: WP-Res.php:803
+#: WP-Res.php
 msgid "Processing Task"
 msgstr ""
 
-#: WP-Res.php:804
+#: WP-Res.php
 msgid "Stop Task"
 msgstr ""
 
-#: WP-Res.php:805
+#: WP-Res.php
 msgid "Cancel"
 msgstr ""
 
-#: WP-Res.php:806
+#: WP-Res.php
 msgid "Confirm"
 msgstr ""
 
-#: WP-Res.php:807
+#: WP-Res.php
 msgid "Continue"
 msgstr ""
 
-#: WP-Res.php:808
+#: WP-Res.php
 msgid "Continue Anyway (Risk Assumed)"
 msgstr ""
 
-#: WP-Res.php:809
+#: WP-Res.php
 msgid "Available space"
 msgstr ""
 
-#: WP-Res.php:810
+#: WP-Res.php
 msgid "Required space"
 msgstr ""
 
-#: WP-Res.php:811
+#: WP-Res.php
 msgid "⚠️ Additional risk notice:"
 msgstr ""
 
-#: WP-Res.php:812
+#: WP-Res.php
 msgid "Please select a backup file first."
 msgstr ""
 
-#: WP-Res.php:813
+#: WP-Res.php
 msgid "⚠️ This operation will overwrite existing data and is irreversible! Continue?"
 msgstr ""
 
-#: WP-Res.php:814
+#: WP-Res.php
 msgid "Preparing..."
 msgstr ""
 
-#: WP-Res.php:815
+#: WP-Res.php
 msgid "Stopping..."
 msgstr ""
 
-#: WP-Res.php:816
+#: WP-Res.php
 msgid "Confirm and Refresh"
 msgstr ""
 
-#: WP-Res.php:817
+#: WP-Res.php
 msgid "Failed to start task: "
 msgstr ""
 
-#: WP-Res.php:818
+#: WP-Res.php
 msgid "Failed to query upload status"
 msgstr ""
 
-#: WP-Res.php:819
+#: WP-Res.php
 msgid "Upload did not complete fully"
 msgstr ""
 
-#: WP-Res.php:820
+#: WP-Res.php
 msgid "Cancelling and cleaning temporary files..."
 msgstr ""
 
-#: WP-Res.php:821
+#: WP-Res.php
 msgid "Upload timeout"
 msgstr ""
 
-#: WP-Res.php:822
+#: WP-Res.php
 msgid "Processing..."
 msgstr ""
 
-#: WP-Res.php:850
-msgid "🔄 WP Backup Restore"
+#: WP-Res.php
+msgid "Scan for Hash Residues"
 msgstr ""
 
-#: WP-Res.php:866
-msgid "No backup files"
+#: WP-Res.php
+msgid "Dry Run (Simulate)"
 msgstr ""
 
-#: WP-Res.php:901
+#: WP-Res.php
+msgid "Start Fix (Batch)"
+msgstr ""
+
+#: WP-Res.php
+msgid "Replace with:"
+msgstr ""
+
+#: WP-Res.php
+msgid "Batch size:"
+msgstr ""
+
+#: WP-Res.php
+msgid "Smart mode (restore wrapped content)"
+msgstr ""
+
+#: WP-Res.php
+msgid "Scanning..."
+msgstr ""
+
+#: WP-Res.php
+msgid "No hash residues found."
+msgstr ""
+
+#: WP-Res.php
+msgid "⚠️ Please confirm you have manually backed up your database before proceeding."
+msgstr ""
+
+#: WP-Res.php
+msgid "Fix progress"
+msgstr ""
+
+#: WP-Res.php
+msgid "Fix completed!"
+msgstr ""
+
+#: WP-Res.php
+msgid "Preview (first 5 rows)"
+msgstr ""
+
+#: WP-Res.php
+msgid "🔄 WP Backup Restore + Fixer"
+msgstr ""
+
+#: WP-Res.php
+msgid "Backup & Restore"
+msgstr ""
+
+#: WP-Res.php
+msgid "This tool scans and removes hash placeholders (e.g., {ccea3ec6...}) that may remain after improper backups or migrations. It safely handles serialized data and supports batch processing, dry run, and transactions. Smart mode automatically restores content wrapped by paired hashes (e.g., {hash}%{hash} → %)."
+msgstr ""
+
+#: WP-Res.php
+msgid "WP Backup Restore"
+msgstr ""
+
+#: WP-Res.php
 msgid "OFF"
 msgstr ""
 
-#: WP-Res.php:902
+#: WP-Res.php
 msgid "ERROR"
 msgstr ""
 
-#: WP-Res.php:903
+#: WP-Res.php
 msgid "WARNING"
 msgstr ""
 
-#: WP-Res.php:904
+#: WP-Res.php
 msgid "INFO"
 msgstr ""
 
-#: WP-Res.php:905
+#: WP-Res.php
 msgid "DEBUG"
 msgstr ""
 
-msgid "WP Backup Restore"
+#: WP-Res.php
+msgid "Leave empty to remove"
+msgstr ""
+
+#: WP-Res.php
+msgid "Table"
+msgstr ""
+
+#: WP-Res.php
+msgid "Column"
+msgstr ""
+
+#: WP-Res.php
+msgid "Rows with Hash"
+msgstr ""
+
+#: WP-Res.php
+msgid "Type"
+msgstr ""
+
+#: WP-Res.php
+msgid "Preview"
+msgstr ""
+
+#: WP-Res.php
+msgid "Hash Value"
+msgstr ""
+
+#: WP-Res.php
+msgid "Occurrences"
+msgstr ""
+
+#: WP-Res.php
+msgid "Context Sample"
+msgstr ""
+
+#: WP-Res.php
+msgid "Mapping Character"
+msgstr ""
+
+#: WP-Res.php
+msgid "Action"
+msgstr ""
+
+#: WP-Res.php
+msgid "No hash provided"
+msgstr ""
+
+#: WP-Res.php
+msgid "Hash Residue Fixer"
+msgstr ""
+
+#: WP-Res.php
+msgid "Loading examples..."
+msgstr ""
+
+#: WP-Res.php
+msgid "No examples found."
+msgstr ""
+
+#: WP-Res.php
+msgid "Please fill in at least one character (e.g. %)"
+msgstr ""
+
+#: WP-Res.php
+msgid "Scan"
+msgstr ""
+
+#: WP-Res.php
+msgid "Total Fixed:"
+msgstr ""
+
+#: WP-Res.php
+msgid "Char (e.g. %)"
 msgstr ""

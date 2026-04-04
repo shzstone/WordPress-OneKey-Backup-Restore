@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: WP一键备份还原（WP One-Click Backup & Restore）
- * Description: 批量处理、兼容序列化的安全域名替换、Session保持、严格目录排除。提供现代UI、备份文件管理、分片上传（动态分片、断点续传、指数退避重试），包含磁盘空间预检查与ZIP64风险提示。
- * Version: 1.0.3
+ * Description: 批量处理、兼容序列化的安全域名替换、Session保持、严格目录排除。提供现代UI、备份文件管理、分片上传（动态分片、断点续传、指数退避重试），包含磁盘空间预检查与ZIP64风险提示。增强哈希占位符修复工具（智能模式、安全对象递归、修正分批偏移、高性能筛选）。
+ * Version: 1.2.0
  * Author: Stone
  * Author URI: https://blog.cacca.cc
  * Text Domain: WP-Res
@@ -28,11 +28,24 @@ class WP_Backup_Restore_Active {
     const LOG_INFO    = 3;
     const LOG_DEBUG   = 4;
 
+    // 修复相关属性
+    private $php_hash_pattern = '/\{[a-f0-9]{32,128}\}/i';
+    private $sql_hash_pattern = '\{[a-f0-9]{32,}\}'; // SQL 层面也要求至少32位
+    private $smart_pattern    = '/\{[a-f0-9]{32,128}\}([^{}]{1,500})\{[a-f0-9]{32,128}\}/is';
+    // 弃用之前的 smart_pattern 复杂匹配，改用逻辑拆分
+    private $supported_tables = [
+        'posts' => ['post_content', 'post_title', 'post_excerpt', 'post_name'],
+        'comments' => ['comment_content', 'comment_author', 'comment_author_email'],
+        'options' => ['option_value'],
+        'postmeta' => ['meta_value'],
+        'termmeta' => ['meta_value'],
+        'usermeta' => ['meta_value'],
+    ];
+
     public function __construct() {
         add_action( 'admin_menu', array( $this, 'add_admin_menu' ) );
         add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_scripts' ) );
 
-        // 加载文本域
         add_action( 'plugins_loaded', array( $this, 'load_textdomain' ) );
 
         if ( ! wp_next_scheduled( 'wpbk_cleanup_temp' ) ) {
@@ -51,6 +64,12 @@ class WP_Backup_Restore_Active {
         add_action( 'wp_ajax_wp_backup_upload_cancel', array( $this, 'ajax_upload_cancel' ) );
 
         add_action( 'wp_ajax_wp_backup_check_space', array( $this, 'ajax_check_space' ) );
+
+        // 新增修复工具 AJAX
+        add_action( 'wp_ajax_wp_fix_scan', array( $this, 'ajax_fix_scan' ) );
+        add_action( 'wp_ajax_wp_fix_preview', array( $this, 'ajax_fix_preview' ) );
+        add_action( 'wp_ajax_wp_fix_batch', array( $this, 'ajax_fix_batch' ) );
+        add_action( 'wp_ajax_wp_fix_dry_run', array( $this, 'ajax_fix_dry_run' ) );
     }
 
     public function load_textdomain() {
@@ -440,34 +459,48 @@ class WP_Backup_Restore_Active {
         fclose($handle);
     }
 
+    /**
+     * 安全的域名替换（修正版：对序列化字段使用 deep_replace，避免破坏序列化）
+     */
     private function replace_domain_safe($old, $new) {
         global $wpdb;
         $old_esc = esc_sql($old);
         $new_esc = esc_sql($new);
         $this->log_message( sprintf( __( 'Starting replace_domain_safe: %s -> %s', 'WP-Res' ), $old, $new ), 'INFO' );
+
+        // 直接更新 siteurl 和 home（非序列化，安全）
         $sql1 = "UPDATE {$wpdb->options} SET option_value = '$new_esc' WHERE option_name IN ('siteurl','home')";
-        $this->log_message( $sql1, 'DEBUG' );
         $result1 = $wpdb->query($sql1);
         $this->log_message( sprintf( __( 'Updated siteurl/home, rows affected: %s', 'WP-Res' ), ($result1 !== false ? $result1 : 'failed') ), 'INFO' );
+
+        // posts 表：post_content, post_title 等（非序列化，安全）
         $sql2 = "UPDATE {$wpdb->posts} SET post_content = REPLACE(post_content, '$old_esc', '$new_esc')";
-        $this->log_message( $sql2, 'DEBUG' );
         $result2 = $wpdb->query($sql2);
         $this->log_message( sprintf( __( 'Updated post_content, rows affected: %s', 'WP-Res' ), ($result2 !== false ? $result2 : 'failed') ), 'INFO' );
+
         $sql3 = "UPDATE {$wpdb->posts} SET guid = REPLACE(guid, '$old_esc', '$new_esc')";
-        $this->log_message( $sql3, 'DEBUG' );
         $result3 = $wpdb->query($sql3);
         $this->log_message( sprintf( __( 'Updated guid, rows affected: %s', 'WP-Res' ), ($result3 !== false ? $result3 : 'failed') ), 'INFO' );
+
+        // options 表其他可能包含 URL 的序列化数据（使用 deep_replace）
         $this->deep_replace($wpdb->options, 'option_id', 'option_value', $old, $new);
-        $sql4 = "UPDATE {$wpdb->postmeta} SET meta_value = REPLACE(meta_value, '$old_esc', '$new_esc')";
-        $this->log_message( $sql4, 'DEBUG' );
-        $result4 = $wpdb->query($sql4);
-        $this->log_message( sprintf( __( 'Updated postmeta, rows affected: %s', 'WP-Res' ), ($result4 !== false ? $result4 : 'failed') ), 'INFO' );
+
+        // postmeta 表（序列化敏感）必须用 deep_replace，不能直接用 SQL REPLACE
+        $this->deep_replace($wpdb->postmeta, 'meta_id', 'meta_value', $old, $new);
+
+        // 其他可能包含序列化数据的表
+        $this->deep_replace($wpdb->termmeta, 'meta_id', 'meta_value', $old, $new);
+        $this->deep_replace($wpdb->usermeta, 'umeta_id', 'meta_value', $old, $new);
+
         $wpdb->query('COMMIT');
         $this->log_message( __( 'COMMIT executed', 'WP-Res' ), 'INFO' );
         wp_cache_flush();
         $this->log_message( __( 'replace_domain_safe completed', 'WP-Res' ), 'INFO' );
     }
 
+    /**
+     * 深度递归替换（保持序列化结构）
+     */
     private function deep_replace($table, $id_col, $val_col, $old, $new) {
         global $wpdb;
         $like = '%' . esc_sql($old) . '%';
@@ -483,16 +516,32 @@ class WP_Backup_Restore_Active {
         }
     }
 
+    /**
+     * 递归替换（支持数组、对象、序列化字符串）
+     */
     private function recursive_replace($data, $old, $new) {
         if (is_string($data)) {
             if (is_serialized($data)) {
                 $un = @unserialize($data);
-                if ($un !== false) return serialize($this->recursive_replace($un, $old, $new));
+                if ($un !== false) {
+                    $fixed = $this->recursive_replace($un, $old, $new);
+                    return serialize($fixed);
+                }
             }
             return str_replace($old, $new, $data);
         }
         if (is_array($data)) {
-            foreach ($data as $k => $v) $data[$k] = $this->recursive_replace($v, $old, $new);
+            foreach ($data as $k => $v) {
+                $data[$k] = $this->recursive_replace($v, $old, $new);
+            }
+            return $data;
+        }
+        if (is_object($data)) {
+            // 保持对象类型，不改变类名
+            foreach (get_object_vars($data) as $prop => $value) {
+                $data->$prop = $this->recursive_replace($value, $old, $new);
+            }
+            return $data;
         }
         return $data;
     }
@@ -590,7 +639,323 @@ class WP_Backup_Restore_Active {
         return glob($dir . '/*.bgbk') ?: [];
     }
 
-    // ==================== AJAX 方法 ====================
+    // ==================== 哈希修复工具核心逻辑（优化版） ====================
+
+    /**
+     * 智能替换：将成对哈希包裹的内容还原（如 {hash}%{hash} -> %）
+     * @param string $string
+     * @param string $replace_with 普通替换时的目标（默认空）
+     * @param bool $smart_mode 是否启用智能模式
+     * @return string
+     */
+    /**
+     * 扫描包含哈希占位符的表和行数（使用 LIKE 提高性能）
+     */
+    public function scan_hash_residues() {
+        global $wpdb;
+        $unique_hashes = [];
+        $tasks = [];
+
+        foreach ($this->supported_tables as $table_key => $columns) {
+            $real_table = $wpdb->prefix . $table_key;
+            if ($wpdb->get_var("SHOW TABLES LIKE '$real_table'") != $real_table) continue;
+
+            foreach ($columns as $col) {
+                // 1. 统计这一列总共有多少行包含大括号特征
+                $sql_count = "SELECT COUNT(*) FROM `$real_table` WHERE `$col` LIKE '%{%'";
+                $count = (int)$wpdb->get_var($sql_count);
+
+                if ($count > 0) {
+                    $tasks[] = [
+                        'table' => $real_table,
+                        'column' => $col,
+                        'total' => $count
+                    ];
+
+                    // 2. 【核心优化】：去掉 LIMIT 100，扫描所有匹配行以提取唯一哈希
+                    // 为了防止单次查询数据量过大，我们只查 ID 这一列（如果知道 ID）或者分批
+                    // 这里为了简单，我们直接查目标字段，但不再设限
+                    $rows = $wpdb->get_results("SELECT `$col` FROM `$real_table` WHERE `$col` LIKE '%{%'", ARRAY_A);
+
+                    if ($rows) {
+                        foreach ($rows as $row) {
+                            if (preg_match_all('/\{[a-f0-9]{32,128}\}/i', $row[$col], $matches)) {
+                                foreach ($matches[0] as $h) {
+                                    if (!isset($unique_hashes[$h])) {
+                                        $unique_hashes[$h] = [
+                                            'count' => 0,
+                                            'sample' => mb_strimwidth(strip_tags($row[$col]), 0, 80, '...')
+                                        ];
+                                    }
+                                    $unique_hashes[$h]['count']++;
+                                }
+                            }
+                        }
+                        // 释放大数组内存
+                        unset($rows);
+                    }
+                }
+            }
+        }
+        return [
+            'hashes' => $unique_hashes,
+            'tasks'  => $tasks
+        ];
+    }
+
+    /**
+     * 获取预览数据（前5条）
+     */
+    public function get_preview_data_by_hash($hash, $limit = 5) {
+        global $wpdb;
+        $preview = [];
+        $smart_mode = get_option('wp_fix_smart_mode', true);
+
+        // 遍历所有支持的表，寻找包含这个特定哈希的行
+        foreach ($this->supported_tables as $table_key => $columns) {
+            if (count($preview) >= $limit) break;
+
+            $real_table = $wpdb->prefix . $table_key;
+            if ($wpdb->get_var("SHOW TABLES LIKE '$real_table'") != $real_table) continue;
+
+            foreach ($columns as $col) {
+                if (count($preview) >= $limit) break;
+
+                // 精准查找包含该哈希的行
+                $rows = $wpdb->get_results($wpdb->prepare(
+                    "SELECT `$col` as val FROM `$real_table` WHERE `$col` LIKE %s LIMIT %d",
+                    '%' . $wpdb->esc_like($hash) . '%',
+                    $limit
+                ), ARRAY_A);
+
+                if ($rows) {
+                    foreach ($rows as $row) {
+                        $value = $row['val'];
+                        // 这里我们不知道用户最终想填什么，所以预览时假设填的是 [REPLACED]
+                        // 或者干脆只展示原始样貌
+                        $preview[] = [
+                            'table'    => $real_table . '.' . $col,
+                            'original' => mb_strimwidth(strip_tags($value), 0, 300, '...'),
+                        ];
+                    }
+                }
+            }
+        }
+        return $preview;
+    }
+
+    /**
+     * 安全递归修复（保持对象类名，支持智能模式）
+     */
+    private function safe_unserialize_replace($data, $hash_map = [], $smart_mode = true) {
+        if (is_string($data)) {
+            if (preg_match('/^[asO]:\d+:/', $data)) {
+                $un = @unserialize($data);
+                if ($un !== false) {
+                    return serialize($this->safe_unserialize_replace($un, $hash_map, $smart_mode));
+                }
+            }
+            return $this->perform_replacement($data, $hash_map, $smart_mode);
+        }
+        if (is_array($data)) {
+            foreach ($data as $k => $v) {
+                $data[$k] = $this->safe_unserialize_replace($v, $replace_with, $smart_mode);
+            }
+            return $data;
+        }
+        if (is_object($data)) {
+            // 【核心修复】：如果是“不完整对象”，禁止修改其属性，防止 Fatal Error
+            if (get_class($data) === '__PHP_Incomplete_Class') {
+                return $data;
+            }
+            $vars = get_object_vars($data);
+            foreach ($vars as $k => $v) {
+                $data->$k = $this->safe_unserialize_replace($v, $replace_with, $smart_mode);
+            }
+            return $data;
+        }
+        return $data;
+    }
+
+    private function perform_replacement($string, $hash_map = [], $smart_mode = true) {
+        if (!is_string($string) || empty($string) || strpos($string, '{') === false) return $string;
+        if (empty($hash_map)) return $string;
+
+        foreach ($hash_map as $hash => $char) {
+            if (empty($hash) || $char === '') continue; // 关键：不填就不修
+
+            if ($smart_mode) {
+                // 成对匹配还原：{hash}text{hash} -> %text%
+                $quoted_hash = preg_quote($hash, '/');
+                $pattern = '/' . $quoted_hash . '([^{}]{1,500})' . $quoted_hash . '/is';
+                $replaced = preg_replace($pattern, $char . '$1' . $char, $string);
+                if ($replaced !== null) $string = $replaced;
+            }
+            // 孤立匹配还原：{hash} -> %
+            $string = str_ireplace($hash, $char, $string);
+        }
+        return $string;
+    }
+
+    /**
+     * 执行修复（批量）- 修正 OFFSET 问题：非模拟运行时始终取前 LIMIT 条（因为已修复的不再匹配）
+     * @param string $table      表名
+     * @param string $column     字段名
+     * @param int    $offset     偏移量（仅 dry_run 时使用）
+     * @param int    $limit      每批数量
+     * @param bool   $dry_run    是否模拟运行
+     * @param string $replace_with 替换字符（默认空字符串）
+     * @param bool   $smart_mode 是否智能模式
+     * @return array ['updated' => int, 'total' => int, 'dry_run' => bool]
+     */
+    private function fix_batch($table, $column, $last_id, $limit, $dry_run = false, $hash_map = [], $smart_mode = true) {
+        global $wpdb;
+        $primary_key = $this->get_primary_key($table);
+        if (!$primary_key) return ['updated' => 0, 'total' => 0, 'last_id' => 0];
+
+        $sql = $wpdb->prepare(
+            "SELECT `$primary_key`, `$column` FROM `$table` WHERE `$primary_key` > %d AND `$column` LIKE '%%{%%' ORDER BY `$primary_key` ASC LIMIT %d",
+            $last_id, $limit
+        );
+        $rows = $wpdb->get_results($sql, ARRAY_A);
+        if (empty($rows)) return ['updated' => 0, 'total' => 0, 'last_id' => -1];
+
+        $updated = 0;
+        $current_max_id = $last_id;
+        $is_meta = (strpos($table, 'meta') !== false || strpos($table, 'options') !== false);
+
+        foreach ($rows as $row) {
+            $row_id = (int)$row[$primary_key];
+            $current_max_id = $row_id;
+            $old_val = (string)$row[$column];
+
+            $new_val = $is_meta ?
+                $this->safe_unserialize_replace($old_val, $hash_map, $smart_mode) :
+                $this->perform_replacement($old_val, $hash_map, $smart_mode);
+
+            if ($new_val !== null && $new_val !== $old_val) {
+                if (!$dry_run) $wpdb->update($table, [$column => $new_val], [$primary_key => $row_id]);
+                $updated++;
+            }
+        }
+        return ['updated' => $updated, 'total' => count($rows), 'last_id' => $current_max_id];
+    }
+
+    /**
+     * 获取表的主键列名
+     */
+    private function get_primary_key($table) {
+        global $wpdb;
+        $keys = $wpdb->get_results("SHOW KEYS FROM `$table` WHERE Key_name = 'PRIMARY'");
+        if (!empty($keys)) return $keys[0]->Column_name;
+
+        // 扩展字段名兼容性
+        $candidates = ['id', 'ID', 'option_id', 'meta_id', 'comment_ID', 'umeta_id', 'term_id'];
+        foreach ($candidates as $col) {
+            if ($wpdb->get_var("SHOW COLUMNS FROM `$table` LIKE '$col'")) return $col;
+        }
+        return false;
+    }
+
+    /**
+     * 获取某个表/字段的总行数（包含哈希的）
+     */
+    private function get_total_rows_with_hash($table, $column) {
+        global $wpdb;
+        $sql = "SELECT COUNT(*) FROM `$table` WHERE `$column` LIKE '%{%' AND `$column` REGEXP '{$this->sql_hash_pattern}'";
+        return (int) $wpdb->get_var($sql);
+    }
+
+    // ==================== 修复工具 AJAX 处理 ====================
+
+    public function ajax_fix_scan() {
+        if (!current_user_can('manage_options')) wp_send_json_error(__('Permission denied', 'WP-Res'));
+        if (!wp_verify_nonce($_POST['_wpnonce'], 'wp_backup_action')) wp_send_json_error(__('Invalid request', 'WP-Res'));
+
+        $scan_result = $this->scan_hash_residues();
+        wp_send_json_success(['scan' => $scan_result]);
+    }
+
+    public function ajax_fix_preview() {
+        check_ajax_referer('wp_backup_action');
+        $hash = isset($_POST['hash']) ? sanitize_text_field($_POST['hash']) : '';
+        if (empty($hash)) wp_send_json_error(__('No hash provided', 'WP-Res'));
+
+        $preview = $this->get_preview_data_by_hash($hash);
+        wp_send_json_success(['preview' => $preview]);
+    }
+
+    public function ajax_fix_batch() {
+        // 1. 权限与安全检查
+        if (!current_user_can('manage_options')) wp_send_json_error(__('Permission denied', 'WP-Res'));
+        if (!wp_verify_nonce($_POST['_wpnonce'], 'wp_backup_action')) wp_send_json_error(__('Invalid request', 'WP-Res'));
+
+        // 2. 获取基础参数
+        $table   = isset($_POST['table']) ? sanitize_text_field($_POST['table']) : '';
+        $column  = isset($_POST['column']) ? sanitize_text_field($_POST['column']) : '';
+        $last_id = isset($_POST['last_id']) ? intval($_POST['last_id']) : 0;
+        $limit   = isset($_POST['limit']) ? intval($_POST['limit']) : 20;
+        $dry_run = isset($_POST['dry_run']) ? (bool)intval($_POST['dry_run']) : false;
+        $smart_mode = isset($_POST['smart_mode']) ? (bool)intval($_POST['smart_mode']) : true;
+
+        // 3. 【核心改动】：获取哈希映射表
+        // 前端会传过来一个对象，例如：{ "{ccea...}": "%", "{d8f1...}": "\\" }
+        $hash_map = [];
+        if (isset($_POST['hash_map']) && is_array($_POST['hash_map'])) {
+            foreach ($_POST['hash_map'] as $hash => $char) {
+                // 对哈希字符串和替换字符都进行安全过滤
+                $hash_map[sanitize_text_field($hash)] = sanitize_text_field($char);
+            }
+        }
+
+        if (empty($table) || empty($column)) {
+            wp_send_json_error(__('Missing parameters', 'WP-Res'));
+        }
+
+        global $wpdb;
+
+        // 4. 开启事务（仅限正式修复模式）
+        if (!$dry_run) {
+            $wpdb->query('START TRANSACTION');
+        }
+
+        try {
+            // 5. 调用 fix_batch，注意传参从 $replace_with 变成了 $hash_map 数组
+            $result = $this->fix_batch($table, $column, $last_id, $limit, $dry_run, $hash_map, $smart_mode);
+
+            if (!$dry_run) {
+                $wpdb->query('COMMIT');
+            }
+            wp_send_json_success($result);
+        } catch (Exception $e) {
+            if (!$dry_run) {
+                $wpdb->query('ROLLBACK');
+            }
+            wp_send_json_error($e->getMessage());
+        }
+    }
+
+    public function ajax_fix_dry_run() {
+        if (!current_user_can('manage_options')) wp_send_json_error(__('Permission denied', 'WP-Res'));
+        if (!wp_verify_nonce($_POST['_wpnonce'], 'wp_backup_action')) wp_send_json_error(__('Invalid request', 'WP-Res'));
+
+        $scan = $this->scan_hash_residues();
+        $total_affected = 0;
+        $details = [];
+        foreach ($scan as $item) {
+            $total = $this->get_total_rows_with_hash($item['table'], $item['column']);
+            $total_affected += $total;
+            $details[] = [
+                'table' => $item['table'],
+                'column' => $item['column'],
+                'rows' => $total,
+                'is_serialized' => $item['is_serialized']
+            ];
+        }
+        wp_send_json_success(['total_rows' => $total_affected, 'details' => $details]);
+    }
+
+    // ==================== AJAX 方法（原有，保持不变） ====================
 
     public function ajax_download_backup() {
         while (ob_get_level()) ob_end_clean();
@@ -638,7 +1003,6 @@ class WP_Backup_Restore_Active {
         $filename = isset( $_POST['filename'] ) ? sanitize_file_name( $_POST['filename'] ) : '';
         $start = isset( $_POST['start'] ) ? intval( $_POST['start'] ) : -1;
         $end = isset( $_POST['end'] ) ? intval( $_POST['end'] ) : -1;
-        // 修复：使用字符串保留完整文件大小，避免 intval 溢出导致 TaskID 不一致
         $file_size = isset( $_POST['file_size'] ) ? (string) $_POST['file_size'] : '0';
 
         if ( empty( $filename ) || $start < 0 || $end <= $start || ! isset( $_FILES['file_chunk'] ) ) {
@@ -696,7 +1060,6 @@ class WP_Backup_Restore_Active {
             fclose( $handle );
             unlink( $meta_file );
             @rmdir( $temp_dir );
-            // 返回明确的状态，前端据此判断是否完成
             wp_send_json_success( [ 'status' => 'success', 'message' => __( 'Upload and merge completed', 'WP-Res' ) ] );
         } else {
             wp_send_json_success( [ 'status' => 'processing', 'message' => __( 'Chunk received', 'WP-Res' ) ] );
@@ -711,7 +1074,6 @@ class WP_Backup_Restore_Active {
             if ( $part['start'] > $covered ) return false;
             $covered = max( $covered, $part['end'] );
         }
-        // $size 可能是字符串（大文件），转为整数比较前确保数值
         $size_int = (int) $size;
         return $covered >= $size_int;
     }
@@ -775,9 +1137,17 @@ class WP_Backup_Restore_Active {
                 color: #fff !important;
                 box-shadow: 0 1px 2px rgba(0,0,0,0.1);
             }
+            .nav-tab-wrapper { margin-bottom: 20px; }
+            .tab-content { display: none; }
+            .tab-content.active { display: block; }
+            .fix-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            .fix-table th, .fix-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            .fix-table th { background: #f1f1f1; }
+            .fix-progress-bar { background: #f0f0f0; height: 24px; border-radius: 12px; overflow: hidden; margin: 15px 0; }
+            .fix-progress-fill { background: #2271b1; width: 0%; height: 100%; text-align: center; color: #fff; line-height: 24px; }
+            .fix-preview-box { background: #fafafa; border-left: 4px solid #2271b1; padding: 10px; margin: 10px 0; font-family: monospace; white-space: pre-wrap; word-break: break-all; }
         ' );
 
-        // 本地化脚本，传递翻译字符串
         $l10n = array(
             'api_url'          => plugins_url( 'restore-api.php', __FILE__ ),
             'ajax_url'         => admin_url( 'admin-ajax.php' ),
@@ -839,7 +1209,6 @@ class WP_Backup_Restore_Active {
             'modal_button_continue_risk' => __( 'Continue Anyway (Risk Assumed)', 'WP-Res' ),
             'space_check_loading' => __( 'Disk Space Check', 'WP-Res' ),
             'space_check_msg'    => __( 'Calculating disk space, please wait...<br><span style="font-size:12px;">(May take a few seconds if the site has many files)</span>', 'WP-Res' ),
-            // ========== 修复 undefined 问题所需的新增键 ==========
             'available_space'    => __( 'Available space', 'WP-Res' ),
             'required_space'     => __( 'Required space', 'WP-Res' ),
             'extra_risk_warning' => __( '⚠️ Additional risk notice:', 'WP-Res' ),
@@ -854,6 +1223,34 @@ class WP_Backup_Restore_Active {
             'upload_cancelling'  => __( 'Cancelling and cleaning temporary files...', 'WP-Res' ),
             'upload_timeout'     => __( 'Upload timeout', 'WP-Res' ),
             'processing'         => __( 'Processing...', 'WP-Res' ),
+            // 修复工具文本
+            'fix_tab_title'      => __( 'Hash Residue Fixer', 'WP-Res' ),
+            'fix_scan_btn'       => __( 'Scan for Hash Residues', 'WP-Res' ),
+            'fix_dry_run_btn'    => __( 'Dry Run (Simulate)', 'WP-Res' ),
+            'fix_start_btn'      => __( 'Start Fix (Batch)', 'WP-Res' ),
+            'fix_replace_with'   => __( 'Replace with:', 'WP-Res' ),
+            'fix_batch_size'     => __( 'Batch size:', 'WP-Res' ),
+            'fix_smart_mode'     => __( 'Smart mode (restore wrapped content)', 'WP-Res' ),
+            'fix_scanning'       => __( 'Scanning...', 'WP-Res' ),
+            'fix_no_residues'    => __( 'No hash residues found.', 'WP-Res' ),
+            'fix_confirm_backup' => __( '⚠️ Please confirm you have manually backed up your database before proceeding.', 'WP-Res' ),
+            'fix_progress'       => __( 'Fix progress', 'WP-Res' ),
+            'fix_complete'       => __( 'Fix completed!', 'WP-Res' ),
+            'fix_preview_title'  => __( 'Preview (first 5 rows)', 'WP-Res' ),
+            'fix_tab_title'      => __( 'Hash Residue Fixer', 'WP-Res' ),
+            'fix_scan_btn'       => __( 'Scan for Hash Residues', 'WP-Res' ),
+            'fix_dry_run_btn'    => __( 'Dry Run (Simulate)', 'WP-Res' ),
+            'fix_start_btn'      => __( 'Start Fix (Batch)', 'WP-Res' ),
+            'fix_scanning'       => __( 'Scanning...', 'WP-Res' ),
+            'fix_no_residues'    => __( 'No hash residues found.', 'WP-Res' ),
+            'fix_confirm_backup' => __( '⚠️ Please confirm you have manually backed up your database before proceeding.', 'WP-Res' ),
+            'fix_complete'       => __( 'Fix completed!', 'WP-Res' ),
+            'fix_loading_ex'     => __( 'Loading examples...', 'WP-Res' ),
+            'fix_no_ex_found'    => __( 'No examples found.', 'WP-Res' ),
+            'fix_enter_char'     => __( 'Please fill in at least one character (e.g. %)', 'WP-Res' ),
+            'fix_scan_prefix'    => __( 'Scan', 'WP-Res' ),
+            'fix_total_fixed'    => __( 'Total Fixed:', 'WP-Res' ),
+            'fix_mapping_placeholder' => __( 'Char (e.g. %)', 'WP-Res' ),
         );
         wp_localize_script( 'jquery', 'wp_backup_l10n', $l10n );
     }
@@ -864,71 +1261,117 @@ class WP_Backup_Restore_Active {
 
     public function admin_page() {
         $backups = $this->get_backup_list();
+        $smart_mode = get_option('wp_fix_smart_mode', true);
+        $replace_with = get_option('wp_fix_replace_with', '');
         ?>
         <div class="wrap">
-            <h1 style="font-weight:600; margin-bottom:24px;"><?php _e( '🔄 WP Backup Restore', 'WP-Res' ); ?></h1>
-            <div class="wp-backup-card">
-                <div style="margin-bottom:20px;">
-                    <button id="btn-bak" class="button button-primary button-large" style="display:inline-flex; align-items:center; gap:6px;">
-                        <span class="dashicons dashicons-backup"></span> <?php _e( 'Backup Now', 'WP-Res' ); ?>
-                    </button>
-                </div>
-                <div style="margin-bottom:12px; display:flex; flex-wrap:wrap; align-items:center; gap:12px;">
-                    <select id="sel-bak" style="min-width:260px; max-width:100%;">
-                        <?php if(empty($backups)): ?>
-                            <option value=""><?php _e( 'No backup files', 'WP-Res' ); ?></option>
-                        <?php else: ?>
-                            <?php foreach($backups as $f): ?>
-                                <option value="<?php echo esc_attr($f); ?>"><?php echo esc_html(basename($f)); ?></option>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </select>
-                    <button id="btn-download" class="button button-secondary" style="display:inline-flex; align-items:center; gap:6px;">
-                        <span class="dashicons dashicons-download"></span> <?php _e( 'Download', 'WP-Res' ); ?>
-                    </button>
-                    <button id="btn-delete" class="button button-secondary button-danger" style="display:inline-flex; align-items:center; gap:6px;">
-                        <span class="dashicons dashicons-trash"></span> <?php _e( 'Delete', 'WP-Res' ); ?>
-                    </button>
-                </div>
-                <div style="margin-bottom:20px;">
-                    <button id="btn-upload" class="button button-secondary" style="display:inline-flex; align-items:center; gap:6px;">
-                        <span class="dashicons dashicons-upload"></span> <?php _e( 'Upload Backup', 'WP-Res' ); ?>
-                    </button>
-                    <button id="btn-cancel-upload" class="button button-secondary button-danger" style="display:inline-flex; align-items:center; gap:6px; margin-left:10px; display:none;">
-                        <span class="dashicons dashicons-no-alt"></span> <?php _e( 'Cancel Upload', 'WP-Res' ); ?>
-                    </button>
-                    <input type="file" id="upload-file-input" accept=".bgbk" style="display:none;">
-                    <div id="upload-progress-container" style="display:none; margin-top:10px;">
-                        <div style="background:#f0f0f0; height:20px; border-radius:10px; overflow:hidden; width:100%; max-width:400px;">
-                            <div id="upload-progress-bar" style="background:#2271b1; width:0%; height:100%; transition:width 0.3s; text-align:center; color:#fff; line-height:20px; font-size:12px;">0%</div>
+            <h1 style="font-weight:600; margin-bottom:24px;"><?php _e( '🔄 WP Backup Restore + Fixer', 'WP-Res' ); ?></h1>
+            <h2 class="nav-tab-wrapper">
+                <a href="#tab-backup" class="nav-tab nav-tab-active" data-tab="backup"><?php _e( 'Backup & Restore', 'WP-Res' ); ?></a>
+                <a href="#tab-fixer" class="nav-tab" data-tab="fixer"><?php _e( 'Hash Residue Fixer', 'WP-Res' ); ?></a>
+            </h2>
+
+            <!-- 备份还原标签页 -->
+            <div id="tab-backup" class="tab-content active">
+                <div class="wp-backup-card">
+                    <div style="margin-bottom:20px;">
+                        <button id="btn-bak" class="button button-primary button-large" style="display:inline-flex; align-items:center; gap:6px;">
+                            <span class="dashicons dashicons-backup"></span> <?php _e( 'Backup Now', 'WP-Res' ); ?>
+                        </button>
+                    </div>
+                    <div style="margin-bottom:12px; display:flex; flex-wrap:wrap; align-items:center; gap:12px;">
+                        <select id="sel-bak" style="min-width:260px; max-width:100%;">
+                            <?php if(empty($backups)): ?>
+                                <option value=""><?php _e( 'No backup files', 'WP-Res' ); ?></option>
+                            <?php else: ?>
+                                <?php foreach($backups as $f): ?>
+                                    <option value="<?php echo esc_attr($f); ?>"><?php echo esc_html(basename($f)); ?></option>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </select>
+                        <button id="btn-download" class="button button-secondary" style="display:inline-flex; align-items:center; gap:6px;">
+                            <span class="dashicons dashicons-download"></span> <?php _e( 'Download', 'WP-Res' ); ?>
+                        </button>
+                        <button id="btn-delete" class="button button-secondary button-danger" style="display:inline-flex; align-items:center; gap:6px;">
+                            <span class="dashicons dashicons-trash"></span> <?php _e( 'Delete', 'WP-Res' ); ?>
+                        </button>
+                    </div>
+                    <div style="margin-bottom:20px;">
+                        <button id="btn-upload" class="button button-secondary" style="display:inline-flex; align-items:center; gap:6px;">
+                            <span class="dashicons dashicons-upload"></span> <?php _e( 'Upload Backup', 'WP-Res' ); ?>
+                        </button>
+                        <button id="btn-cancel-upload" class="button button-secondary button-danger" style="display:inline-flex; align-items:center; gap:6px; margin-left:10px; display:none;">
+                            <span class="dashicons dashicons-no-alt"></span> <?php _e( 'Cancel Upload', 'WP-Res' ); ?>
+                        </button>
+                        <input type="file" id="upload-file-input" accept=".bgbk" style="display:none;">
+                        <div id="upload-progress-container" style="display:none; margin-top:10px;">
+                            <div style="background:#f0f0f0; height:20px; border-radius:10px; overflow:hidden; width:100%; max-width:400px;">
+                                <div id="upload-progress-bar" style="background:#2271b1; width:0%; height:100%; transition:width 0.3s; text-align:center; color:#fff; line-height:20px; font-size:12px;">0%</div>
+                            </div>
+                            <div id="upload-status" style="margin-top:5px; font-size:12px; color:#555;"></div>
                         </div>
-                        <div id="upload-status" style="margin-top:5px; font-size:12px; color:#555;"></div>
+                    </div>
+                    <div style="margin-bottom:20px;">
+                        <button id="btn-res" class="button restore-danger-btn" style="display:inline-flex; align-items:center; gap:6px;">
+                            <span style="font-size:1.2em;">↩️</span> <?php _e( 'Full Site Restore', 'WP-Res' ); ?>
+                        </button>
+                    </div>
+                    <hr style="margin:20px 0;">
+                    <div class="log-area">
+                        <label><strong><?php _e( '📋 Debug Log Level:', 'WP-Res' ); ?></strong></label>
+                        <select id="log-level" style="margin-left:12px; border-radius:4px;">
+                            <option value="OFF" <?php selected( $this->log_level, 'OFF' ); ?>><?php _e( 'OFF', 'WP-Res' ); ?></option>
+                            <option value="ERROR" <?php selected( $this->log_level, 'ERROR' ); ?>><?php _e( 'ERROR', 'WP-Res' ); ?></option>
+                            <option value="WARNING" <?php selected( $this->log_level, 'WARNING' ); ?>><?php _e( 'WARNING', 'WP-Res' ); ?></option>
+                            <option value="INFO" <?php selected( $this->log_level, 'INFO' ); ?>><?php _e( 'INFO', 'WP-Res' ); ?></option>
+                            <option value="DEBUG" <?php selected( $this->log_level, 'DEBUG' ); ?>><?php _e( 'DEBUG', 'WP-Res' ); ?></option>
+                        </select>
+                        <span id="log-save-status" style="margin-left:12px; color:#00a32a;"></span>
+                        <p class="description" style="margin-top:10px;">
+                            <?php _e( '📁 Log file:', 'WP-Res' ); ?> <code><?php echo esc_html( $this->get_backup_dir() . '/restore.log' ); ?></code>
+                            <a href="javascript:void(0);" id="copy-log-path" class="copy-path-btn"><?php _e( '📋 Copy path', 'WP-Res' ); ?></a>
+                        </p>
                     </div>
                 </div>
-                <div style="margin-bottom:20px;">
-                    <button id="btn-res" class="button restore-danger-btn" style="display:inline-flex; align-items:center; gap:6px;">
-                        <span style="font-size:1.2em;">↩️</span> <?php _e( 'Full Site Restore', 'WP-Res' ); ?>
-                    </button>
-                </div>
-                <hr style="margin:20px 0;">
-                <div class="log-area">
-                    <label><strong><?php _e( '📋 Debug Log Level:', 'WP-Res' ); ?></strong></label>
-                    <select id="log-level" style="margin-left:12px; border-radius:4px;">
-                        <option value="OFF" <?php selected( $this->log_level, 'OFF' ); ?>><?php _e( 'OFF', 'WP-Res' ); ?></option>
-                        <option value="ERROR" <?php selected( $this->log_level, 'ERROR' ); ?>><?php _e( 'ERROR', 'WP-Res' ); ?></option>
-                        <option value="WARNING" <?php selected( $this->log_level, 'WARNING' ); ?>><?php _e( 'WARNING', 'WP-Res' ); ?></option>
-                        <option value="INFO" <?php selected( $this->log_level, 'INFO' ); ?>><?php _e( 'INFO', 'WP-Res' ); ?></option>
-                        <option value="DEBUG" <?php selected( $this->log_level, 'DEBUG' ); ?>><?php _e( 'DEBUG', 'WP-Res' ); ?></option>
-                    </select>
-                    <span id="log-save-status" style="margin-left:12px; color:#00a32a;"></span>
-                    <p class="description" style="margin-top:10px;">
-                        <?php _e( '📁 Log file:', 'WP-Res' ); ?> <code><?php echo esc_html( $this->get_backup_dir() . '/restore.log' ); ?></code>
-                        <a href="javascript:void(0);" id="copy-log-path" class="copy-path-btn"><?php _e( '📋 Copy path', 'WP-Res' ); ?></a>
-                    </p>
+            </div>
+
+            <!-- 哈希修复标签页 -->
+            <div id="tab-fixer" class="tab-content">
+                <div class="wp-backup-card">
+                    <p><?php _e( 'This tool scans and removes hash placeholders (e.g., {ccea3ec6...}) that may remain after improper backups or migrations. It safely handles serialized data and supports batch processing, dry run, and transactions. Smart mode automatically restores content wrapped by paired hashes (e.g., {hash}%{hash} → %).', 'WP-Res' ); ?></p>
+                    <div style="margin-bottom:15px;">
+                        <label><input type="checkbox" id="fix-smart-mode" <?php checked($smart_mode, true); ?>> <?php _e( 'Smart mode (restore wrapped content)', 'WP-Res' ); ?></label>
+                        <label style="margin-left:20px;"><?php _e( 'Replace with:', 'WP-Res' ); ?> <input type="text" id="fix-replace-with" value="<?php echo esc_attr($replace_with); ?>" placeholder="<?php esc_attr_e('Leave empty to remove', 'WP-Res'); ?>" style="width:200px;"></label>
+                        <label style="margin-left:20px;"><?php _e( 'Batch size:', 'WP-Res' ); ?> <input type="number" id="fix-batch-size" value="20" min="1" max="500" style="width:80px;"></label>
+                    </div>
+                    <div>
+                        <button id="fix-scan-btn" class="button button-secondary"><?php _e( 'Scan for Hash Residues', 'WP-Res' ); ?></button>
+                        <button id="fix-dryrun-btn" class="button button-secondary" disabled><?php _e( 'Dry Run (Simulate)', 'WP-Res' ); ?></button>
+                        <button id="fix-start-btn" class="button button-primary" disabled><?php _e( 'Start Fix (Batch)', 'WP-Res' ); ?></button>
+                    </div>
+                    <div id="fix-scan-result" style="margin-top:20px; display:none;">
+                        <h3><?php _e( 'Scan Results', 'WP-Res' ); ?></h3>
+                        <table class="fix-table" id="fix-result-table">
+                            <thead>
+                                <tr>
+                                    <th><?php _e('Hash Value', 'WP-Res'); ?></th>
+                                    <th><?php _e('Occurrences', 'WP-Res'); ?></th>
+                                    <th><?php _e('Context Sample', 'WP-Res'); ?></th>
+                                    <th><?php _e('Mapping Character', 'WP-Res'); ?></th>
+                                    <th><?php _e('Action', 'WP-Res'); ?></th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                        <div id="fix-preview-area"></div>
+                        <div class="fix-progress-bar" id="fix-progress-container" style="display:none;"><div id="fix-progress-fill" class="fix-progress-fill">0%</div></div>
+                        <div id="fix-message"></div>
+                    </div>
                 </div>
             </div>
         </div>
 
+        <!-- 模态窗（备份还原共用） -->
         <div id="modal-progress" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:100000; text-align:center; padding-top:150px;">
             <div style="background:#fff; width:500px; margin:0 auto; padding:25px 30px 30px; border-radius:12px; box-shadow:0 5px 20px rgba(0,0,0,0.3); text-align:left;">
                 <h3 id="modal-title" style="margin:0 0 20px; font-size:18px; border-bottom:1px solid #ddd; padding-bottom:10px;"><?php _e( 'Processing Task', 'WP-Res' ); ?></h3>
@@ -955,7 +1398,18 @@ class WP_Backup_Restore_Active {
             var pollInterval = null;
             var isStopping = false;
 
-            // 显示等待模态窗（用于空间检查时的 Loading）
+            // 选项卡切换
+            $('.nav-tab').click(function(e) {
+                e.preventDefault();
+                var tab = $(this).data('tab');
+                $('.nav-tab').removeClass('nav-tab-active');
+                $(this).addClass('nav-tab-active');
+                $('.tab-content').removeClass('active');
+                $('#tab-' + tab).addClass('active');
+            });
+
+
+            // 备份还原相关函数（与原来一致）
             function showWaitingModal() {
                 resetConfirmButton();
                 $('#modal-title').text(l10n.space_check_loading);
@@ -967,11 +1421,10 @@ class WP_Backup_Restore_Active {
                 $('#modal-progress').show();
             }
 
-            // 通用模态窗确认（用于显示检查结果）
             function showModalWithConfirm(title, message, canProceed, onConfirm, extraWarning) {
                 resetConfirmButton();
                 $('#modal-title').text(title);
-                $('#progress-bar').hide();               // 空间检查时不需要进度条
+                $('#progress-bar').hide();
                 $('#progress-msg').html(message + (extraWarning ? '<br><br><span style="color:#d63638;">⚠️ ' + (l10n.extra_risk_warning || 'Additional risk notice') + '</span><br>' + extraWarning : ''));
                 $('#stop-btn').hide();
                 $('#cancel-modal-btn').show().text(l10n.modal_button_cancel).off('click').click(closeModal);
@@ -989,7 +1442,6 @@ class WP_Backup_Restore_Active {
                 $('#modal-progress').show();
             }
 
-            // 备份按钮：先显示等待，再检查空间
             $('#btn-bak').click(function() {
                 showWaitingModal();
                 $.post(ajaxUrl, {
@@ -997,7 +1449,7 @@ class WP_Backup_Restore_Active {
                     check_type: 'backup',
                     _wpnonce: nonce
                 }, function(res) {
-                    closeModal(); // 关闭等待模态窗
+                    closeModal();
                     if (res.success) {
                         var data = res.data;
                         var msg = (data.message || '') + '<br>' + (l10n.available_space || 'Available space') + '：' + (data.free || '?') + '<br>' + (l10n.required_space || 'Required space') + '：' + (data.required || '?');
@@ -1013,7 +1465,6 @@ class WP_Backup_Restore_Active {
                 });
             });
 
-            // 还原按钮：先显示等待，再检查空间
             $('#btn-res').click(function() {
                 var file = $('#sel-bak').val();
                 if (!file) {
@@ -1035,7 +1486,6 @@ class WP_Backup_Restore_Active {
                         var data = res.data;
                         var msg = (data.message || '') + '<br>' + (l10n.available_space || 'Available space') + '：' + (data.free || '?') + '<br>' + (l10n.required_space || 'Required space') + '：' + (data.required || '?');
                         showModalWithConfirm(l10n.disk_space_check, msg, data.enough, function() {
-                            // 继续原有还原确认流程
                             showModal(l10n.restore_confirm, true);
                             $('#progress-msg').html(l10n.restore_confirm_msg);
                             $('#confirm-btn').one('click', function() {
@@ -1057,7 +1507,6 @@ class WP_Backup_Restore_Active {
                 });
             });
 
-            // ========== 以下为下载、删除、上传、备份还原轮询等 ==========
             $('#btn-download').click(function(e) {
                 e.preventDefault();
                 var file = $('#sel-bak').val();
@@ -1075,7 +1524,7 @@ class WP_Backup_Restore_Active {
                 }, 'json').fail(function() { alert(l10n.request_failed); });
             });
 
-            // ========== 动态分片上传 ==========
+            // 分片上传逻辑（保留原有）
             let currentFile = null;
             let currentChunkSize = 2 * 1024 * 1024;
             let minChunkSize = 512 * 1024;
@@ -1228,7 +1677,6 @@ class WP_Backup_Restore_Active {
                             formData.append('_wpnonce', nonce);
                             try {
                                 const response = await uploadChunkWithBackoff(formData, start, chunkEnd);
-                                // 判断是否完成合并
                                 if (response && response.data && response.data.status === 'success') {
                                     isUploading = false;
                                     $('#upload-progress-bar').css('width', '100%').text('100%');
@@ -1236,7 +1684,6 @@ class WP_Backup_Restore_Active {
                                     setTimeout(() => location.reload(), 1000);
                                     return;
                                 }
-                                // 未完成，更新进度
                                 uploadedParts.push({ start: start, end: chunkEnd });
                                 uploadedParts = mergeIntervals(uploadedParts);
                                 const uploadedNow = uploadedParts.reduce((sum, p) => sum + (p.end - p.start), 0);
@@ -1250,7 +1697,6 @@ class WP_Backup_Restore_Active {
                         }
                     }
 
-                    // 所有分片处理完毕，最后检查一次状态（防止合并后未及时返回）
                     const finalParts = await getUploadedParts(file.name, file.size);
                     const finalMerged = mergeIntervals(finalParts);
                     const totalCovered = finalMerged.reduce((sum, p) => sum + (p.end - p.start), 0);
@@ -1294,7 +1740,7 @@ class WP_Backup_Restore_Active {
                 uploadFileInChunks(file);
             });
 
-            // ========== 备份/还原轮询逻辑（保持不变） ==========
+            // 备份/还原轮询
             function resetConfirmButton() {
                 $('#confirm-btn').off('click').click(closeModal);
                 $('#cancel-modal-btn').off('click').click(closeModal);
@@ -1422,9 +1868,186 @@ class WP_Backup_Restore_Active {
                 var text = $('.log-area code').text();
                 navigator.clipboard.writeText(text).then(function() { alert(l10n.copy_path_success); });
             });
+
+            // ========== 哈希修复工具 JS ==========
+            var fixScanResult = null;
+
+            // 1. 扫描逻辑
+            $('#fix-scan-btn').click(function() {
+                var btn = $(this);
+                btn.prop('disabled', true).text(l10n.fix_scanning);
+                $.post(ajaxUrl, { action: 'wp_fix_scan', _wpnonce: nonce }, function(res) {
+                    if (res.success) {
+                        fixScanResult = res.data.scan;
+                        renderScanResult(fixScanResult.hashes);
+                        $('#fix-dryrun-btn, #fix-start-btn').prop('disabled', false);
+                    } else {
+                        alert(l10n.error_occurred + (res.data || ''));
+                    }
+                }).always(function() {
+                    btn.prop('disabled', false).text(l10n.fix_scan_btn);
+                });
+            });
+
+            // 2. 渲染哈希列表
+            function renderScanResult(uniqueHashes) {
+                var tbody = $('#fix-result-table tbody');
+                tbody.empty();
+                if (!uniqueHashes || $.isEmptyObject(uniqueHashes)) {
+                    tbody.html('<tr><td colspan="5">' + l10n.fix_no_residues + '</td></tr>');
+                    return;
+                }
+                $.each(uniqueHashes, function(hashStr, data) {
+                    var previewBtn = $('<button class="button button-small">Preview</button>');
+                    previewBtn.click(function() { loadHashPreview(hashStr); });
+
+                    var row = $('<tr>')
+                        .append($('<td>').append($('<code>').text(hashStr)))
+                        .append($('<td>').text(data.count))
+                        .append($('<td>').css('font-size','11px').text(data.sample))
+                        .append($('<td>').append('<input type="text" class="hash-map-input" data-hash="'+hashStr+'" placeholder="填 % 或 \\" style="width:60px;">'))
+                        .append($('<td>').append(previewBtn));
+                    tbody.append(row);
+                });
+                $('#fix-scan-result').show();
+            }
+
+            // 3. 加载预览
+            function loadHashPreview(hashStr) {
+                $('#fix-preview-area').html('<p>Loading examples...</p>');
+                $.post(ajaxUrl, { action: 'wp_fix_preview', hash: hashStr, _wpnonce: nonce }, function(res) {
+                    if (res.success && res.data.preview.length > 0) {
+                        var html = '<div class="fix-preview-box"><strong>Examples for ' + hashStr + ':</strong>';
+                        $.each(res.data.preview, function(i, item) {
+                            html += '<hr><small>Location: ' + item.table + '</small><br>' + escapeHtml(item.original);
+                        });
+                        html += '</div>';
+                        $('#fix-preview-area').html(html);
+                    } else {
+                        $('#fix-preview-area').html('<p>No examples found.</p>');
+                    }
+                });
+            }
+
+            // 4. 启动修复
+            function runFix(dryRun) {
+                if (!fixScanResult || !fixScanResult.tasks || fixScanResult.tasks.length === 0) {
+                    alert('Please scan first.');
+                    return;
+                }
+
+                var batchSize = parseInt($('#fix-batch-size').val(), 10) || 20;
+                var smartMode = $('#fix-smart-mode').is(':checked');
+
+                // 收集映射关系
+                var hashMap = {};
+                var hasAnyInput = false;
+                $('.hash-map-input').each(function() {
+                    var h = $(this).data('hash');
+                    var v = $(this).val();
+                    if (h && v !== '') {
+                        hashMap[h] = v;
+                        hasAnyInput = true;
+                    }
+                });
+
+                if (!hasAnyInput) {
+                    alert('Please fill in at least one character (e.g. %)');
+                    return;
+                }
+
+                if (!confirm(l10n.fix_confirm_backup)) return;
+
+                fixedRows = 0;
+                $('#fix-progress-container').show();
+                $('#fix-progress-fill').css('width', '0%').text('0%');
+
+                // 核心：调用唯一的任务处理函数
+                processNextTask(fixScanResult.tasks, 0, hashMap, batchSize, dryRun, smartMode);
+            }
+
+            // 5. 递归处理表任务
+            function processNextTask(tasks, taskIndex, hashMap, batchSize, dryRun, smartMode) {
+                if (taskIndex >= tasks.length) {
+                    $('#fix-progress-fill').css({'width': '100%', 'background': '#46b450'}).text('100%');
+                    $('#fix-message').html('<p style="color:green; font-weight:bold;">' + l10n.fix_complete + ' Total Fixed: ' + fixedRows + '</p>');
+                    return;
+                }
+
+                var task = tasks[taskIndex];
+                var lastId = 0;
+                var tableProcessed = 0;
+
+                function processBatch() {
+                    $.post(ajaxUrl, {
+                        action: 'wp_fix_batch',
+                        table: task.table,
+                        column: task.column,
+                        last_id: lastId,
+                        limit: batchSize,
+                        dry_run: dryRun ? 1 : 0,
+                        hash_map: hashMap,
+                        smart_mode: smartMode ? 1 : 0,
+                        _wpnonce: nonce
+                    }, function(res) {
+                        if (res.success) {
+                            var updated = res.data.updated;
+                            var inspected = res.data.total;
+                            lastId = res.data.last_id;
+
+                            fixedRows += updated;
+                            tableProcessed += inspected;
+
+                            var displayPercent = Math.min(100, Math.round((tableProcessed / task.total) * 100));
+                            $('#fix-progress-fill').css('width', displayPercent + '%').text(displayPercent + '%');
+                            $('#fix-message').html('<b>' + task.table + '</b>: ' + l10n.fix_scan_prefix + ' ' + tableProcessed + '/' + task.total + ' (' + l10n.fix_total_fixed + ' ' + fixedRows + ')');
+
+                            if (lastId !== -1 && inspected > 0) {
+                                processBatch();
+                            } else {
+                                processNextTask(tasks, taskIndex + 1, hashMap, batchSize, dryRun, smartMode);
+                            }
+                        } else {
+                            processNextTask(tasks, taskIndex + 1, hashMap, batchSize, dryRun, smartMode);
+                        }
+                    }).fail(function() {
+                        $('#fix-message').append('<p style="color:red;">Network Error in ' + task.table + '</p>');
+                    });
+                }
+                processBatch();
+            }
+
+            // 绑定按钮
+            $('#fix-dryrun-btn').click(function() { runFix(true); });
+            $('#fix-start-btn').click(function() { runFix(false); });
+
+            function escapeHtml(str) {
+                if (!str) return '';
+                return str.replace(/[&<>]/g, function(m) {
+                    return {'&':'&amp;','<':'&lt;','>':'&gt;'}[m];
+                });
+            }
+
+            // 保存修复选项的 AJAX
+            $.post(ajaxUrl, { action: 'save_fix_options', smart_mode: $('#fix-smart-mode').is(':checked') ? 1 : 0, replace_with: $('#fix-replace-with').val(), _wpnonce: nonce });
+            $('#fix-smart-mode, #fix-replace-with').change(function() {
+                $.post(ajaxUrl, { action: 'save_fix_options', smart_mode: $('#fix-smart-mode').is(':checked') ? 1 : 0, replace_with: $('#fix-replace-with').val(), _wpnonce: nonce });
+            });
         });
         </script>
         <?php
     }
 }
+
+// 添加保存修复选项的 AJAX 处理
+add_action('wp_ajax_save_fix_options', function() {
+    if (!current_user_can('manage_options')) wp_send_json_error();
+    if (!wp_verify_nonce($_POST['_wpnonce'], 'wp_backup_action')) wp_send_json_error();
+    $smart_mode = isset($_POST['smart_mode']) ? (bool) $_POST['smart_mode'] : true;
+    $replace_with = isset($_POST['replace_with']) ? sanitize_text_field($_POST['replace_with']) : '';
+    update_option('wp_fix_smart_mode', $smart_mode);
+    update_option('wp_fix_replace_with', $replace_with);
+    wp_send_json_success();
+});
+
 new WP_Backup_Restore_Active();
