@@ -1146,6 +1146,14 @@ class WP_Backup_Restore_Active {
             .fix-progress-bar { background: #f0f0f0; height: 24px; border-radius: 12px; overflow: hidden; margin: 15px 0; }
             .fix-progress-fill { background: #2271b1; width: 0%; height: 100%; text-align: center; color: #fff; line-height: 24px; }
             .fix-preview-box { background: #fafafa; border-left: 4px solid #2271b1; padding: 10px; margin: 10px 0; font-family: monospace; white-space: pre-wrap; word-break: break-all; }
+            /* 添加到原有的 dashicons 样式块中 */
+            .fix-table-wrapper { transition: opacity 0.3s ease; position: relative; }
+            .smart-mode-overlay-hint {
+                display: none; background: #fff9e6; border: 1px dashed #ffb900;
+                padding: 10px; margin-bottom: 10px; border-radius: 4px; color: #856404; font-weight: 500;
+            }
+            .hash-map-input { transition: border-color 0.2s, box-shadow 0.2s; border: 1px solid #999; }
+            .hash-map-input.has-value { border-color: #46b450 !important; box-shadow: 0 0 4px rgba(70,180,80,0.3); background: #fafffa; }
         ' );
 
         $l10n = array(
@@ -1249,8 +1257,17 @@ class WP_Backup_Restore_Active {
             'fix_no_ex_found'    => __( 'No examples found.', 'WP-Res' ),
             'fix_enter_char'     => __( 'Please fill in at least one character (e.g. %)', 'WP-Res' ),
             'fix_scan_prefix'    => __( 'Scan', 'WP-Res' ),
-            'fix_total_fixed'    => __( 'Total Fixed:', 'WP-Res' ),
-            'fix_mapping_placeholder' => __( 'Char (e.g. %)', 'WP-Res' ),
+            'fix_scan_first'         => __( 'Please scan first.', 'WP-Res' ),
+            'fix_smart_mode_empty'   => __( 'In smart mode, please enter a global replacement character at the top.', 'WP-Res' ),
+            'fix_manual_mode_empty'  => __( 'In manual mode, please fill in mapping values for the hashes you want to fix in the table below.', 'WP-Res' ),
+            'fix_dry_run_confirm'    => __( 'Start dry run?', 'WP-Res' ),
+            'fix_confirm_backup'     => __( '⚠️ Please confirm you have manually backed up your database before proceeding.', 'WP-Res' ),
+            'fix_complete_title'     => __( 'Fix completed!', 'WP-Res' ),
+            'fix_total_fixed'        => __( 'Total Fixed:', 'WP-Res' ),
+            'fix_mapping_placeholder' => __( 'e.g. % or \\', 'WP-Res' ),
+            'preview'            => __( 'Preview', 'WP-Res' ),
+            'only_available_in_smart_mode' => __( 'Only available in smart mode', 'WP-Res' ),
+            'eg_enter_percent'             => __( 'e.g. enter %', 'WP-Res' ),
         );
         wp_localize_script( 'jquery', 'wp_backup_l10n', $l10n );
     }
@@ -1338,34 +1355,60 @@ class WP_Backup_Restore_Active {
             <!-- 哈希修复标签页 -->
             <div id="tab-fixer" class="tab-content">
                 <div class="wp-backup-card">
-                    <p><?php _e( 'This tool scans and removes hash placeholders (e.g., {ccea3ec6...}) that may remain after improper backups or migrations. It safely handles serialized data and supports batch processing, dry run, and transactions. Smart mode automatically restores content wrapped by paired hashes (e.g., {hash}%{hash} → %).', 'WP-Res' ); ?></p>
-                    <div style="margin-bottom:15px;">
-                        <label><input type="checkbox" id="fix-smart-mode" <?php checked($smart_mode, true); ?>> <?php _e( 'Smart mode (restore wrapped content)', 'WP-Res' ); ?></label>
-                        <label style="margin-left:20px;"><?php _e( 'Replace with:', 'WP-Res' ); ?> <input type="text" id="fix-replace-with" value="<?php echo esc_attr($replace_with); ?>" placeholder="<?php esc_attr_e('Leave empty to remove', 'WP-Res'); ?>" style="width:200px;"></label>
-                        <label style="margin-left:20px;"><?php _e( 'Batch size:', 'WP-Res' ); ?> <input type="number" id="fix-batch-size" value="20" min="1" max="500" style="width:80px;"></label>
+                    <p><?php _e( 'This tool scans and fixes hash placeholders left after backup. Manual mode requires item-by-item confirmation; Smart mode supports global paired restoration.', 'WP-Res' ); ?></p>
+
+                    <!-- 模式选择区 -->
+                    <div style="margin-bottom:15px; background: #f9f9f9; padding: 15px; border-radius: 8px; border: 1px solid #e5e5e5;">
+                        <label style="font-weight: 600; cursor: pointer;">
+                            <input type="checkbox" id="fix-smart-mode"> <?php _e( 'Enable Smart Mode (Global Auto Processing)', 'WP-Res' ); ?>
+                        </label>
+                        <label style="margin-left:25px; color: #666;" id="fix-global-label">
+                            <?php _e( 'Global replacement character:', 'WP-Res' ); ?>
+                            <input type="text" id="fix-replace-with" value="" placeholder="<?php esc_attr_e( 'Only available in smart mode', 'WP-Res' ); ?>" style="width:140px; background: #eee; cursor: not-allowed;" disabled>
+                        </label>
+                        <label style="margin-left:25px;">
+                            <?php _e( 'Batch size:', 'WP-Res' ); ?>
+                            <input type="number" id="fix-batch-size" value="100" min="1" max="500" style="width:70px; border-radius:4px;">
+                        </label>
                     </div>
+
                     <div>
-                        <button id="fix-scan-btn" class="button button-secondary"><?php _e( 'Scan for Hash Residues', 'WP-Res' ); ?></button>
-                        <button id="fix-dryrun-btn" class="button button-secondary" disabled><?php _e( 'Dry Run (Simulate)', 'WP-Res' ); ?></button>
-                        <button id="fix-start-btn" class="button button-primary" disabled><?php _e( 'Start Fix (Batch)', 'WP-Res' ); ?></button>
+                        <button id="fix-scan-btn" class="button button-secondary"><?php _e( 'Scan Residual Hashes', 'WP-Res' ); ?></button>
+                        <button id="fix-dryrun-btn" class="button button-secondary" disabled><?php _e( 'Dry Run', 'WP-Res' ); ?></button>
+                        <button id="fix-start-btn" class="button button-primary" disabled><?php _e( 'Start Fix Now', 'WP-Res' ); ?></button>
                     </div>
+
+                    <!-- 扫描结果区 -->
                     <div id="fix-scan-result" style="margin-top:20px; display:none;">
                         <h3><?php _e( 'Scan Results', 'WP-Res' ); ?></h3>
-                        <table class="fix-table" id="fix-result-table">
-                            <thead>
-                                <tr>
-                                    <th><?php _e('Hash Value', 'WP-Res'); ?></th>
-                                    <th><?php _e('Occurrences', 'WP-Res'); ?></th>
-                                    <th><?php _e('Context Sample', 'WP-Res'); ?></th>
-                                    <th><?php _e('Mapping Character', 'WP-Res'); ?></th>
-                                    <th><?php _e('Action', 'WP-Res'); ?></th>
-                                </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
+
+                        <!-- 智能模式下的文字提示 -->
+                        <div id="smart-mode-hint" class="smart-mode-overlay-hint">
+                            <span class="dashicons dashicons-info" style="vertical-align: middle;"></span>
+                            <?php _e( 'Smart mode is active: individual settings in the table below are temporarily disabled. The system will uniformly use the global replacement character above for paired restoration.', 'WP-Res' ); ?>
+                        </div>
+
+                        <!-- 表格容器 -->
+                        <div id="fix-table-container" class="fix-table-wrapper">
+                            <table class="fix-table" id="fix-result-table">
+                                <thead>
+                                    <tr>
+                                        <th><?php _e( 'Hash Value', 'WP-Res' ); ?></th>
+                                        <th><?php _e( 'Occurrences', 'WP-Res' ); ?></th>
+                                        <th><?php _e( 'Context Sample', 'WP-Res' ); ?></th>
+                                        <th><?php _e( 'Mapping Character', 'WP-Res' ); ?></th>
+                                        <th><?php _e( 'Action', 'WP-Res' ); ?></th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+
                         <div id="fix-preview-area"></div>
-                        <div class="fix-progress-bar" id="fix-progress-container" style="display:none;"><div id="fix-progress-fill" class="fix-progress-fill">0%</div></div>
-                        <div id="fix-message"></div>
+                        <div class="fix-progress-bar" id="fix-progress-container" style="display:none;">
+                            <div id="fix-progress-fill" class="fix-progress-fill">0%</div>
+                        </div>
+                        <div id="fix-message" style="margin-top:10px; font-weight:500;"></div>
                     </div>
                 </div>
             </div>
@@ -1893,23 +1936,35 @@ class WP_Backup_Restore_Active {
             function renderScanResult(uniqueHashes) {
                 var tbody = $('#fix-result-table tbody');
                 tbody.empty();
+
                 if (!uniqueHashes || $.isEmptyObject(uniqueHashes)) {
-                    tbody.html('<tr><td colspan="5">' + l10n.fix_no_residues + '</td></tr>');
+                    tbody.html('<tr><td colspan="5" style="text-align:center; padding:20px;">' + l10n.fix_no_residues + '</td></tr>');
                     return;
                 }
-                $.each(uniqueHashes, function(hashStr, data) {
-                    var previewBtn = $('<button class="button button-small">Preview</button>');
-                    previewBtn.click(function() { loadHashPreview(hashStr); });
 
+                $.each(uniqueHashes, function(hashStr, data) {
+                    var btnText = l10n.preview || 'Preview';
+                    var placeholderText = l10n.fix_mapping_placeholder || 'e.g. % or \\';
+
+                    var previewBtn = $('<button class="button button-small">' + btnText + '</button>');
+                    previewBtn.click(function() {
+                        loadHashPreview(hashStr);
+                    });
+                    var inputHtml = '<input type="text" class="hash-map-input" data-hash="' + hashStr + '" placeholder="' + placeholderText + '" style="width:100%; max-width:80px; border-radius:4px;">';
                     var row = $('<tr>')
-                        .append($('<td>').append($('<code>').text(hashStr)))
-                        .append($('<td>').text(data.count))
-                        .append($('<td>').css('font-size','11px').text(data.sample))
-                        .append($('<td>').append('<input type="text" class="hash-map-input" data-hash="'+hashStr+'" placeholder="填 % 或 \\" style="width:60px;">'))
-                        .append($('<td>').append(previewBtn));
+                        .append($('<td style="vertical-align:middle;">').append($('<code style="word-break:break-all;">').text(hashStr)))
+                        .append($('<td style="vertical-align:middle; text-align:center;">').text(data.count))
+                        .append($('<td style="vertical-align:middle; font-size:11px; color:#666;">').text(data.sample))
+                        .append($('<td style="vertical-align:middle; text-align:center;">').append(inputHtml))
+                        .append($('<td style="vertical-align:middle; text-align:center;">').append(previewBtn));
+
                     tbody.append(row);
                 });
                 $('#fix-scan-result').show();
+                if ($('#fix-smart-mode').is(':checked')) {
+                    $('#fix-table-container').css({'opacity': '0.3', 'pointer-events': 'none'});
+                    $('#smart-mode-hint').show();
+                }
             }
 
             // 3. 加载预览
@@ -1969,8 +2024,11 @@ class WP_Backup_Restore_Active {
             // 5. 递归处理表任务
             function processNextTask(tasks, taskIndex, hashMap, batchSize, dryRun, smartMode) {
                 if (taskIndex >= tasks.length) {
-                    $('#fix-progress-fill').css({'width': '100%', 'background': '#46b450'}).text('100%');
-                    $('#fix-message').html('<p style="color:green; font-weight:bold;">' + l10n.fix_complete + ' Total Fixed: ' + fixedRows + '</p>');
+                    var finalMsg = '<p style="color:green; font-weight:bold;">' +
+                                   (l10n.fix_complete_title || 'Fix completed!') + ' ' +
+                                   (l10n.fix_total_fixed || 'Total Fixed:') + ' ' + fixedRows + '</p>';
+
+                    $('#fix-message').html(finalMsg);
                     return;
                 }
 
@@ -2011,7 +2069,10 @@ class WP_Backup_Restore_Active {
                             processNextTask(tasks, taskIndex + 1, hashMap, batchSize, dryRun, smartMode);
                         }
                     }).fail(function() {
-                        $('#fix-message').append('<p style="color:red;">Network Error in ' + task.table + '</p>');
+                                var finalMsg = '<p style="color:red;">' +
+                                               (l10n.network_error_in|| 'Network Error in') +
+                                                ' ' + task.table + '</p>';
+                                $('#fix-message').html(finalMsg);
                     });
                 }
                 processBatch();
@@ -2033,6 +2094,116 @@ class WP_Backup_Restore_Active {
             $('#fix-smart-mode, #fix-replace-with').change(function() {
                 $.post(ajaxUrl, { action: 'save_fix_options', smart_mode: $('#fix-smart-mode').is(':checked') ? 1 : 0, replace_with: $('#fix-replace-with').val(), _wpnonce: nonce });
             });
+
+            // --- 颜色反馈与 UI 联动逻辑 ---
+            window.i18n = {
+                translations: {},
+                currentLang: 'en',
+                __: function(text) {
+                    const dict = this.translations[this.currentLang] || {};
+                    return dict[text] !== undefined ? dict[text] : text;
+                }
+            };
+            window.__ = function(text) { return window.i18n.__(text); };
+
+            $(document).on('change', '#fix-smart-mode', function() {
+                var isSmart = $(this).is(':checked');
+                var $globalInput = $('#fix-replace-with');
+                var $globalLabel = $('#fix-global-label');
+                var $tableContainer = $('#fix-table-container');
+                var $smartHint = $('#smart-mode-hint');
+
+                if (isSmart) {
+                    $globalInput.prop('disabled', false).removeAttr('disabled').css({
+                        'background-color': '#fff',
+                        'color': '#333',
+                        'border-color': '#8c8f94',
+                        'cursor': 'text'
+                    }).attr('placeholder', l10n.eg_enter_percent || 'e.g. %').focus();
+
+                    $globalLabel.css('color', '#333');
+                    $tableContainer.css({'opacity': '0.3', 'pointer-events': 'none'});
+                    $smartHint.stop().fadeIn(200);
+                } else {
+                    $globalInput.prop('disabled', true).attr('disabled', 'disabled').css({
+                        'background-color': '#eee',
+                        'color': '#a7aaad',
+                        'border-color': '#dcdcde',
+                        'cursor': 'not-allowed'
+                    }).val('').attr('placeholder', l10n.only_available_in_smart_mode || 'Only available in smart mode');
+
+                    $globalLabel.css('color', '#666');
+                    $tableContainer.css({'opacity': '1', 'pointer-events': 'auto'});
+                    $smartHint.stop().fadeOut(200);
+                }
+            });
+
+            $(document).on('input', '.hash-map-input', function() {
+                var val = $(this).val().trim();
+                if (val !== '') {
+                    $(this).addClass('has-value');
+                } else {
+                    $(this).removeClass('has-value');
+                }
+            });
+
+            function runFix(dryRun) {
+                // 1. 检查扫描结果
+                if (!fixScanResult || !fixScanResult.hashes) {
+                    alert(l10n.fix_scan_first || 'Please scan first.');
+                    return;
+                }
+
+                var smartMode = $('#fix-smart-mode').is(':checked');
+                var globalChar = $('#fix-replace-with').val();
+                var hashMap = {};
+                var hasAnyInput = false;
+
+                if (smartMode) {
+                    // 2. 智能模式逻辑
+                    if (globalChar === '') {
+                        alert(l10n.fix_smart_mode_empty || 'In smart mode, please enter a global replacement character at the top.');
+                        $('#fix-replace-with').focus();
+                        return;
+                    }
+                    $.each(fixScanResult.hashes, function(hashStr) {
+                        hashMap[hashStr] = globalChar;
+                    });
+                    hasAnyInput = true;
+                } else {
+                    // 3. 手动模式逻辑
+                    $('.hash-map-input').each(function() {
+                        var h = $(this).data('hash');
+                        var v = $(this).val();
+                        if (h && v !== '') {
+                            hashMap[h] = v;
+                            hasAnyInput = true;
+                        }
+                    });
+                    if (!hasAnyInput) {
+                        alert(l10n.fix_manual_mode_empty || 'In manual mode, please fill in mapping values for the hashes you want to fix in the table below.');
+                        return;
+                    }
+                }
+
+                // 4. 确认逻辑：根据是否为模拟运行显示不同文案
+                var confirmMsg = dryRun ? (l10n.fix_dry_run_confirm || 'Start dry run?') : (l10n.fix_confirm_backup);
+                if (!confirm(confirmMsg)) return;
+
+                // 5. 执行修复
+                fixedRows = 0;
+                $('#fix-progress-container').show();
+                $('#fix-progress-fill').css({'width': '0%', 'background': '#2271b1'}).text('0%');
+
+                processNextTask(
+                    fixScanResult.tasks,
+                    0,
+                    hashMap,
+                    parseInt($('#fix-batch-size').val()) || 20,
+                    dryRun,
+                    smartMode
+                );
+            }
         });
         </script>
         <?php

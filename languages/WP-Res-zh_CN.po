@@ -683,3 +683,55 @@ msgstr "总计修复："
 #: WP-Res.php
 msgid "Char (e.g. %)"
 msgstr "字符（例如 %）"
+
+msgid "e.g. enter %"
+msgstr "例如填入 %"
+
+msgid "Only available in smart mode"
+msgstr "仅智能模式可用"
+
+msgid "Please scan first."
+msgstr "请先进行扫描。"
+
+msgid "In smart mode, please enter a global replacement character at the top."
+msgstr "智能模式下，请在顶部填入全局替换字符。"
+
+msgid "In manual mode, please fill in mapping values for the hashes you want to fix in the table below."
+msgstr "手动模式下，请在下方表格中为你想要修复的 Hash 填入映射值。"
+
+msgid "Start dry run?"
+msgstr "开始模拟运行？"
+
+msgid "⚠️ Warning: The database will be modified. Confirm you have a backup?"
+msgstr "⚠️ 警告：即将修改数据库，确认已备份？"
+
+msgid "This tool scans and fixes hash placeholders left after backup. Manual mode requires item-by-item confirmation; Smart mode supports global paired restoration."
+msgstr "该工具扫描并修复备份后残留的哈希占位符。手动模式需逐项确认；智能模式支持全局成对还原。"
+
+msgid "Enable Smart Mode (Global Auto Processing)"
+msgstr "开启智能模式 (全局自动处理)"
+
+msgid "Global replacement character:"
+msgstr "全局替换字符:"
+
+msgid "Scan Residual Hashes"
+msgstr "扫描残留哈希"
+
+msgid "Dry Run"
+msgstr "模拟运行"
+
+msgid "Start Fix Now"
+msgstr "立即开始修复"
+
+msgid "Scan Results"
+msgstr "扫描结果"
+
+msgid "Smart mode is active: individual settings in the table below are temporarily disabled. The system will uniformly use the global replacement character above for paired restoration."
+msgstr "当前处于智能模式：下方表格的单独设置已暂时屏蔽，系统将统一使用上方的全局替换字符进行成对还原。"
+
+#: WP-Res.php
+msgid "e.g. % or \\"
+msgstr "例如 % 或 \\"
+
+msgid "Network Error in"
+msgstr "网络错误发生于"

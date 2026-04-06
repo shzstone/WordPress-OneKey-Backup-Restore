@@ -682,3 +682,55 @@ msgstr ""
 #: WP-Res.php
 msgid "Char (e.g. %)"
 msgstr ""
+
+msgid "e.g. enter %"
+msgstr ""
+
+msgid "Please scan first."
+msgstr ""
+
+msgid "In smart mode, please enter a global replacement character at the top."
+msgstr ""
+
+msgid "In manual mode, please fill in mapping values for the hashes you want to fix in the table below."
+msgstr ""
+
+msgid "Start dry run?"
+msgstr ""
+
+msgid "⚠️ Warning: The database will be modified. Confirm you have a backup?"
+msgstr ""
+
+msgid "This tool scans and fixes hash placeholders left after backup. Manual mode requires item-by-item confirmation; Smart mode supports global paired restoration."
+msgstr ""
+
+msgid "Enable Smart Mode (Global Auto Processing)"
+msgstr ""
+
+msgid "Global replacement character:"
+msgstr ""
+
+msgid "Only available in smart mode"
+msgstr ""
+
+msgid "Scan Residual Hashes"
+msgstr ""
+
+msgid "Dry Run"
+msgstr ""
+
+msgid "Start Fix Now"
+msgstr ""
+
+msgid "Scan Results"
+msgstr ""
+
+msgid "Smart mode is active: individual settings in the table below are temporarily disabled. The system will uniformly use the global replacement character above for paired restoration."
+msgstr ""
+
+#: WP-Res.php
+msgid "e.g. % or \\"
+msgstr ""
+
+msgid "Network Error in"
+msgstr ""
